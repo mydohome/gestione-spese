@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le mie spese</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="head">
+      <button type="button" class="logout" id="logout">Esci</button>
+      <h1>Le mie spese</h1>
+      <p>Annota spese ed entrate con una categoria. Riepiloghi, grafici e categoria suggerita si aggiornano da soli.</p>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Ambito spese">
+      <button type="button" class="tab is-active" data-scope="personal" role="tab" aria-selected="true">Personali</button>
+      <button type="button" class="tab" data-scope="home" role="tab" aria-selected="false">Casa</button>
+    </nav>
+
+    <section class="summary" aria-label="Riepiloghi">
+      <article class="box">
+        <span class="box__label">Oggi</span>
+        <span class="box__value" id="sum-day">—</span>
+        <span class="box__sub">
+          <span>Entrate <b id="sum-day-in">—</b></span>
+          <span>Saldo <b class="bal" id="sum-day-bal">—</b></span>
+        </span>
+      </article>
+      <article class="box">
+        <span class="box__label">Questa settimana</span>
+        <span class="box__value" id="sum-week">—</span>
+        <span class="box__sub">
+          <span>Entrate <b id="sum-week-in">—</b></span>
+          <span>Saldo <b class="bal" id="sum-week-bal">—</b></span>
+        </span>
+      </article>
+      <article class="box">
+        <span class="box__label">Questo mese</span>
+        <span class="box__value" id="sum-month">—</span>
+        <span class="box__sub">
+          <span>Entrate <b id="sum-month-in">—</b></span>
+          <span>Saldo <b class="bal" id="sum-month-bal">—</b></span>
+        </span>
+      </article>
+    </section>
+
+    <form class="form" id="form">
+      <div class="seg" role="group" aria-label="Tipo movimento">
+        <input type="radio" name="kind" id="kind-expense" value="expense" checked>
+        <label for="kind-expense">Spesa</label>
+        <input type="radio" name="kind" id="kind-income" value="income">
+        <label for="kind-income">Entrata</label>
+      </div>
+      <div class="field">
+        <label for="date">Data</label>
+        <input type="date" id="date" name="date" required>
+      </div>
+      <div class="field">
+        <label for="amount">Importo (€)</label>
+        <input type="number" id="amount" name="amount" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>
+      </div>
+      <div class="field field--grow">
+        <label for="description">Descrizione</label>
+        <input type="text" id="description" name="description" maxlength="500" placeholder="Es. Spesa supermercato / Stipendio">
+      </div>
+      <div class="field field--grow" id="cat-field-personal">
+        <label for="category">Categoria</label>
+        <input type="text" id="category" name="category" list="cat-list" maxlength="60" autocomplete="off" placeholder="Es. Alimentari, Trasporti…">
+        <button type="button" class="suggest" id="cat-suggest" hidden></button>
+      </div>
+      <div class="field field--grow" id="cat-field-home" hidden>
+        <label for="category-home">Categoria</label>
+        <select id="category-home" name="category-home" class="select select--form">
+          <option value="UTENZE">UTENZE</option>
+          <option value="CONDOMINIO">CONDOMINIO</option>
+          <option value="VARIE">VARIE</option>
+        </select>
+      </div>
+      <button type="submit" class="btn">Aggiungi</button>
+    </form>
+    <p class="error" id="error" hidden></p>
+    <p class="model-note" id="model-note" hidden></p>
+
+    <datalist id="cat-list"></datalist>
+
+    <section class="charts">
+      <article class="chart-card">
+        <h2>Ultimi 30 giorni</h2>
+        <div class="chart-box"><canvas id="chart-daily"></canvas></div>
+      </article>
+      <article class="chart-card">
+        <h2>Andamento mensile</h2>
+        <div class="chart-box"><canvas id="chart-monthly"></canvas></div>
+      </article>
+      <article class="chart-card">
+        <h2>Categorie del mese</h2>
+        <div class="chart-box"><canvas id="chart-categories"></canvas></div>
+      </article>
+    </section>
+
+    <section class="list-wrap">
+      <div class="list-head">
+        <h2>Movimenti</h2>
+        <span class="list-total" id="list-total"></span>
+      </div>
+      <div class="list-scroll">
+        <table class="list">
+          <thead>
+            <tr>
+              <th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrizione</th>
+              <th class="num">Importo</th><th aria-label="Azioni"></th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr class="empty"><td colspan="6">Caricamento…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="backup">
+      <div class="backup__head">
+        <h2>Backup e ripristino</h2>
+        <span class="backup__status" id="backup-status">—</span>
+      </div>
+      <p class="backup__note">
+        Export automatico ogni <b>lunedì alle 03:00</b> nella cartella
+        <code>docker/webserver/backups/</code> (ultime 12 settimane).
+        Il file <code>expenses-latest.csv</code> è sempre l'ultima copia.
+      </p>
+      <div class="backup__actions">
+        <a class="btn btn--ghost" href="/api/export.csv">Esporta CSV ora</a>
+        <button type="button" class="btn btn--ghost" id="backup-run">Salva backup su disco</button>
+        <label class="btn btn--ghost file-btn">
+          Importa CSV…
+          <input type="file" id="import-file" accept=".csv,text/csv" hidden>
+        </label>
+        <select id="import-mode" class="select">
+          <option value="merge">Unisci (salta duplicati)</option>
+          <option value="replace">Sostituisci tutto</option>
+        </select>
+      </div>
+      <p class="backup__result" id="backup-result" hidden></p>
+      <ul class="backup__list" id="backup-list"></ul>
+    </section>
+  </div>
+
+  <script src="/vendor/chart.umd.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

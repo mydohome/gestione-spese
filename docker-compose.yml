@@ -1,0 +1,41 @@
+services:
+  app:
+    build: ./app
+    container_name: webserver
+    environment:
+      - TZ=Europe/Rome
+      - PORT=3000
+      - NODE_ENV=development
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      - BACKUP_DIR=/app/backups
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - COOKIE_SECURE=${COOKIE_SECURE}
+    volumes:
+      - ./app:/app
+      - /app/node_modules
+      - ./backups:/app/backups   # export CSV settimanali (per ripristino)
+    ports:
+      - 3005:3000   # host 3005 -> container 3000 ; poi rimappato da NPM
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    container_name: webserver-db
+    environment:
+      - TZ=Europe/Rome
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    volumes:
+      - ./db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped

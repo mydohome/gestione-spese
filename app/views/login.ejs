@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accedi · Le mie spese</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="login">
+    <form class="login__card" id="login-form">
+      <h1>Le mie spese</h1>
+      <p class="login__sub">Accedi per continuare</p>
+
+      <label for="username">Utente</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+      <button type="submit" class="btn">Accedi</button>
+      <p class="login__error" id="login-error" hidden></p>
+    </form>
+  </main>
+
+  <script>
+    const f = document.getElementById('login-form');
+    const err = document.getElementById('login-error');
+    f.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      err.hidden = true;
+      const btn = f.querySelector('button');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        if (res.ok) {
+          location.href = '/';
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        err.textContent = data.error || 'Accesso non riuscito.';
+        err.hidden = false;
+      } catch {
+        err.textContent = 'Errore di rete.';
+        err.hidden = false;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

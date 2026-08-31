@@ -1,0 +1,20 @@
+# --- Segreti / configurazione locale ---
+.env
+*.env
+!.env.example
+
+# --- Dati PostgreSQL (bind mount) ---
+db/
+
+# --- Backup CSV con dati reali delle spese ---
+backups/
+app/backups/
+
+# --- Dipendenze ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- Varie ---
+.DS_Store
+*.log
