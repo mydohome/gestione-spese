@@ -112,11 +112,12 @@ h1, h2, h3 { letter-spacing: -.02em; }
     padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
   }
   .tabbar button {
-    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    background: none; border: none; padding: 6px 0;
-    color: var(--ink-faint); font-size: .68rem; font-weight: 600;
+    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: none; border: none; padding: 6px 2px;
+    color: var(--ink-faint); font-size: .64rem; font-weight: 600;
   }
-  .tabbar button svg { width: 22px; height: 22px; }
+  .tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabbar button svg { width: 21px; height: 21px; }
   .tabbar button.active { color: var(--brand); }
 }
 
@@ -127,18 +128,28 @@ h1, h2, h3 { letter-spacing: -.02em; }
 .page-head h1 { font-size: 1.55rem; }
 .page-head p { color: var(--ink-faint); font-size: .9rem; margin-top: 2px; }
 
-/* Riga categoria (vista Categorie) */
-#cat-rows .cat-row {
+/* Righe di gestione (Categorie / Conti) */
+#cat-rows .cat-row, #acct-rows .cat-row {
   display: flex; align-items: center; gap: 12px;
   padding: 13px 15px; border-bottom: 1px solid var(--line);
 }
-#cat-rows .cat-row:last-child { border-bottom: none; }
+#cat-rows .cat-row:last-child, #acct-rows .cat-row:last-child { border-bottom: none; }
 .cat-row .dot { width: 13px; height: 13px; border-radius: 5px; flex: none; }
+.cat-row .c-main { min-width: 0; flex: 1; }
 .cat-row .c-name { font-weight: 600; }
+.cat-row .c-name .pill { margin-left: 6px; }
 .cat-row .c-count { color: var(--ink-faint); font-size: .8rem; }
-.cat-row .c-amt { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
+.cat-row .c-amt { text-align: right; font-variant-numeric: tabular-nums; }
 .cat-row .c-amt b { display: block; font-weight: 700; }
 .cat-row .c-amt span { color: var(--ink-faint); font-size: .78rem; }
+.cat-row .row-actions { display: flex; gap: 4px; }
+
+.mini-add {
+  font: inherit; font-size: .74rem; font-weight: 600;
+  border: none; background: none; color: var(--brand);
+  padding: 0 0 0 6px;
+}
+.mini-add:hover { text-decoration: underline; }
 
 /* ---------- Cards ---------- */
 .card {

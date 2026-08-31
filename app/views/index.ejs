@@ -33,6 +33,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V4a1 1 0 0 1 1-1h9l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="8" cy="8" r="1.6"/></svg>
           <span>Categorie</span>
         </button>
+        <button type="button" class="nav-link" data-view="conti">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7H5a2 2 0 0 1 0-4h13v4Z"/><path d="M4 7v11a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1"/><circle cx="16" cy="13" r="1.3"/></svg>
+          <span>Conti</span>
+        </button>
         <button type="button" class="nav-link" data-view="backup">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
           <span>Backup</span>
@@ -148,24 +152,16 @@
             <input type="text" id="description" name="description" maxlength="500" placeholder="Es. Spesa supermercato / Stipendio">
           </div>
           <div class="field field--grow" id="cat-field-personal">
-            <label for="category">Categoria</label>
-            <input type="text" id="category" name="category" list="cat-list" maxlength="60" autocomplete="off" placeholder="Es. Alimentari, Trasporti…">
-            <button type="button" class="suggest" id="cat-suggest" hidden></button>
+            <label for="category">Categoria <button type="button" class="mini-add" data-add="category">+ nuova</button></label>
+            <select id="category" name="category" class="select"></select>
           </div>
           <div class="field field--grow" id="cat-field-home" hidden>
-            <label for="category-home">Categoria</label>
-            <select id="category-home" name="category-home" class="select">
-              <option value="UTENZE">UTENZE</option>
-              <option value="CONDOMINIO">CONDOMINIO</option>
-              <option value="VARIE">VARIE</option>
-            </select>
+            <label for="category-home">Categoria <button type="button" class="mini-add" data-add="category">+ nuova</button></label>
+            <select id="category-home" name="category-home" class="select"></select>
           </div>
-          <div class="field" id="conto-field-home" hidden>
-            <label for="account-home">Conto</label>
-            <select id="account-home" name="account-home" class="select">
-              <option value="CONTO ANNA">CONTO ANNA</option>
-              <option value="CONTO MASSY">CONTO MASSY</option>
-            </select>
+          <div class="field field--grow" id="conto-field">
+            <label for="account">Conto <button type="button" class="mini-add" data-add="account">+ nuovo</button></label>
+            <select id="account" name="account" class="select"></select>
           </div>
           <button type="submit" class="btn primary">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -173,8 +169,6 @@
           </button>
         </form>
         <p class="model-note" id="model-note" hidden></p>
-
-        <datalist id="cat-list"></datalist>
 
         <div class="list-head">
           <h2 class="section-title">Movimenti</h2>
@@ -187,21 +181,41 @@
 
       <!-- ============ CATEGORIE ============ -->
       <section data-view="categorie" hidden>
-        <div class="grid cols-2">
-          <article class="card card-pad chart-card">
-            <h3>Spese per categoria</h3>
-            <p class="hint">Mese corrente</p>
-            <div class="chart-box"><canvas id="chart-categories"></canvas></div>
-          </article>
-          <article class="card card-pad chart-card" id="card-accounts" hidden>
-            <h3>Casa · per conto</h3>
-            <p class="hint">Mese corrente</p>
-            <div class="chart-box"><canvas id="chart-accounts"></canvas></div>
-          </article>
-        </div>
+        <article class="card card-pad chart-card">
+          <h3>Spese per categoria</h3>
+          <p class="hint">Mese corrente</p>
+          <div class="chart-box"><canvas id="chart-categories"></canvas></div>
+        </article>
 
-        <h2 class="section-title" style="margin:24px 0 12px">Riepilogo categorie</h2>
+        <div class="list-head">
+          <h2 class="section-title">Gestione categorie</h2>
+          <button type="button" class="btn primary" id="cat-add">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nuova categoria
+          </button>
+        </div>
         <div class="card" id="cat-rows">
+          <div class="empty">Caricamento…</div>
+        </div>
+      </section>
+
+      <!-- ============ CONTI ============ -->
+      <section data-view="conti" hidden>
+        <article class="card card-pad chart-card">
+          <h3>Spese per conto</h3>
+          <p class="hint">Mese corrente</p>
+          <div class="chart-box"><canvas id="chart-accounts"></canvas></div>
+        </article>
+
+        <div class="list-head">
+          <h2 class="section-title">Gestione conti</h2>
+          <button type="button" class="btn primary" id="acct-add">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nuovo conto
+          </button>
+        </div>
+        <p class="hint" style="margin:0 2px 12px">Il conto è facoltativo: puoi associarlo a qualsiasi spesa, personale o di casa.</p>
+        <div class="card" id="acct-rows">
           <div class="empty">Caricamento…</div>
         </div>
       </section>
@@ -251,6 +265,10 @@
       <button type="button" data-view="categorie">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V4a1 1 0 0 1 1-1h9l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="8" cy="8" r="1.6"/></svg>
         <span>Categorie</span>
+      </button>
+      <button type="button" data-view="conti">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7H5a2 2 0 0 1 0-4h13v4Z"/><path d="M4 7v11a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1"/><circle cx="16" cy="13" r="1.3"/></svg>
+        <span>Conti</span>
       </button>
       <button type="button" data-view="backup">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>

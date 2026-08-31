@@ -64,13 +64,19 @@ function toast(msg, kind) {
 
 const form = $('#form');
 const rowsEl = $('#tx-list');
-const catInput = $('#category');
-const catSuggestBtn = $('#cat-suggest');
-const catHomeSelect = $('#category-home');
-const accountHomeSelect = $('#account-home');
+const catSelect = $('#category');          // categoria spese personali
+const catHomeSelect = $('#category-home'); // categoria spese di casa
+const accountSelect = $('#account');       // conto (facoltativo, ogni ambito)
 
-const HOME_CATEGORIES = ['UTENZE', 'CONDOMINIO', 'VARIE'];
-const HOME_ACCOUNTS = ['CONTO ANNA', 'CONTO MASSY'];
+// Anagrafiche caricate dal server
+let catCache = { personal: [], home: [] }; // [{id, name, count, ...}]
+let acctCache = [];                        // [{id, name, count, ...}]
+
+const optList = (names, sel, emptyLabel) =>
+  (emptyLabel != null ? `<option value="">${emptyLabel}</option>` : '') +
+  names.map((n) =>
+    `<option value="${escapeAttr(n)}"${n === sel ? ' selected' : ''}>${escapeHtml(n)}</option>`
+  ).join('');
 
 let expenses = [];
 let editingId = null;
@@ -78,10 +84,12 @@ let dailyChart, monthlyChart, catChart, acctChart;
 let predictTimer = null;
 let categoryAuto = false; // true se la categoria e' stata compilata dal modello e non ancora toccata
 
-const VIEWS = ['dashboard', 'movimenti', 'categorie', 'backup'];
+const VIEWS = ['dashboard', 'movimenti', 'categorie', 'conti', 'backup'];
 const VIEW_TITLE = {
-  dashboard: 'Dashboard', movimenti: 'Movimenti', categorie: 'Categorie', backup: 'Backup',
+  dashboard: 'Dashboard', movimenti: 'Movimenti', categorie: 'Categorie',
+  conti: 'Conti', backup: 'Backup',
 };
+const NO_SCOPE_VIEWS = new Set(['conti', 'backup']); // dati globali: niente switch ambito
 const SCOPE_LABEL = { personal: 'personali', home: 'di casa', all: 'personali e di casa' };
 
 const readHash = () => (location.hash.replace(/^#\/?/, '') || 'dashboard');
@@ -102,6 +110,7 @@ const VIEW_LOADERS = {
   dashboard: loadDashboard,
   movimenti: loadMovimenti,
   categorie: loadCategorieView,
+  conti: loadContiView,
   backup: loadBackupView,
 };
 
@@ -117,12 +126,15 @@ function setView(next, { push = true } = {}) {
     b.classList.toggle('active', b.dataset.view === view);
   });
 
-  // Lo switch ambito non ha senso nella sezione Backup (dati globali)
-  $('#scope-switch').hidden = view === 'backup';
+  // Lo switch ambito non ha senso su Conti/Backup (dati globali)
+  $('#scope-switch').hidden = NO_SCOPE_VIEWS.has(view);
   $('#page-title').textContent = VIEW_TITLE[view];
-  $('#page-sub').textContent = view === 'backup'
-    ? 'Copie CSV e ripristino'
-    : `Spese ed entrate ${SCOPE_LABEL[scope]}`;
+  const subs = {
+    backup: 'Copie CSV e ripristino',
+    conti: 'Anagrafica conti correnti',
+    categorie: `Categorie ${SCOPE_LABEL[scope]}`,
+  };
+  $('#page-sub').textContent = subs[view] || `Spese ed entrate ${SCOPE_LABEL[scope]}`;
 
   editingId = null;
   reloadView();
@@ -141,19 +153,13 @@ window.addEventListener('hashchange', () => setView(readHash(), { push: false })
 /* ---------- Switch ambito: Personali / Casa / Totale ---------- */
 
 function applyScopeUI() {
-  const home = scope === 'home';
   const all = scope === 'all';
   // Il tab "Totale" è di sola lettura: niente form di inserimento
   form.hidden = all;
-  $('#cat-field-personal').hidden = !(scope === 'personal');
-  $('#cat-field-home').hidden = !home;
-  $('#conto-field-home').hidden = !home;
+  $('#cat-field-personal').hidden = scope !== 'personal';
+  $('#cat-field-home').hidden = scope !== 'home';
   $('#split-panel').hidden = !all;
-  $('#card-accounts').hidden = !(home || all);
-  if (scope !== 'personal') {
-    hideSuggestion();
-    $('#model-note').hidden = true;
-  }
+  if (scope !== 'personal') $('#model-note').hidden = true;
 }
 
 document.querySelectorAll('#scope-switch .tab').forEach((btn) => {
@@ -166,7 +172,8 @@ document.querySelectorAll('#scope-switch .tab').forEach((btn) => {
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    $('#page-sub').textContent = `Spese ed entrate ${SCOPE_LABEL[scope]}`;
+    const subs = { categorie: `Categorie ${SCOPE_LABEL[scope]}` };
+    $('#page-sub').textContent = subs[view] || `Spese ed entrate ${SCOPE_LABEL[scope]}`;
     editingId = null;
     applyScopeUI();
     reloadView();
@@ -206,11 +213,24 @@ async function loadSummary() {
 
 /* ---------- Categorie e modello predittivo ---------- */
 
-async function loadCategories() {
-  // Il datalist serve solo alle spese personali (categoria libera):
-  // le spese di casa hanno categorie fisse e non usano l'autocompletamento.
-  const cats = await jfetch('/api/categories?scope=personal').then((r) => r.json());
-  $('#cat-list').innerHTML = cats.map((c) => `<option value="${escapeAttr(c)}"></option>`).join('');
+async function loadAnagrafiche() {
+  const [cats, accs] = await Promise.all([
+    jfetch('/api/categories?scope=all').then((r) => r.json()),
+    jfetch('/api/accounts').then((r) => r.json()),
+  ]);
+  catCache = {
+    personal: cats.filter((c) => c.scope === 'personal'),
+    home: cats.filter((c) => c.scope === 'home'),
+  };
+  acctCache = accs;
+  fillFormSelects();
+}
+
+function fillFormSelects() {
+  const pv = catSelect.value, hv = catHomeSelect.value, av = accountSelect.value;
+  catSelect.innerHTML = optList(catCache.personal.map((c) => c.name), pv, '— nessuna —');
+  catHomeSelect.innerHTML = optList(catCache.home.map((c) => c.name), hv, null);
+  accountSelect.innerHTML = optList(acctCache.map((a) => a.name), av, '— nessuno —');
 }
 
 async function loadModelNote() {
@@ -236,15 +256,10 @@ function currentDraft() {
   };
 }
 
-function hideSuggestion() {
-  catSuggestBtn.hidden = true;
-  catSuggestBtn.textContent = '';
-}
-
 async function runPrediction() {
-  if (scope !== 'personal') return hideSuggestion();
+  if (scope !== 'personal' || view !== 'movimenti') return;
   const draft = currentDraft();
-  if (!draft.description.trim() && !draft.amount) return hideSuggestion();
+  if (!draft.description.trim() && !draft.amount) return;
 
   let pred;
   try {
@@ -256,17 +271,15 @@ async function runPrediction() {
   } catch {
     return;
   }
+  if (!pred || !pred.category) return;
 
-  if (!pred || !pred.category) return hideSuggestion();
-
-  const pct = Math.round((pred.confidence || 0) * 100);
-  catSuggestBtn.textContent = `💡 ${pred.category} · ${pct}%`;
-  catSuggestBtn.dataset.value = pred.category;
-  catSuggestBtn.hidden = false;
-
-  // Compila in automatico solo se il campo e' vuoto o era gia' un valore automatico
-  if (!catInput.value.trim() || categoryAuto) {
-    catInput.value = pred.category;
+  // Preseleziona la categoria prevista se esiste in anagrafica e l'utente
+  // non ha ancora scelto manualmente.
+  const opt = [...catSelect.options].find(
+    (o) => o.value && o.value.toLowerCase() === pred.category.toLowerCase()
+  );
+  if (opt && (categoryAuto || !catSelect.value)) {
+    catSelect.value = opt.value;
     categoryAuto = true;
   }
 }
@@ -276,14 +289,7 @@ function schedulePrediction() {
   predictTimer = setTimeout(runPrediction, 350);
 }
 
-catSuggestBtn.addEventListener('click', () => {
-  if (catSuggestBtn.dataset.value) {
-    catInput.value = catSuggestBtn.dataset.value;
-    categoryAuto = false;
-    catInput.focus();
-  }
-});
-catInput.addEventListener('input', () => { categoryAuto = false; });
+catSelect.addEventListener('change', () => { categoryAuto = false; });
 $('#description').addEventListener('input', schedulePrediction);
 $('#amount').addEventListener('change', schedulePrediction);
 $('#date').addEventListener('change', schedulePrediction);
@@ -319,12 +325,13 @@ function viewRow(e) {
 }
 
 function editRow(e) {
-  const catField = e.scope === 'home'
-    ? `<label>Categoria<select data-f="category">${HOME_CATEGORIES
-        .map((c) => `<option value="${c}"${e.category === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
-       <label>Conto<select data-f="account">${HOME_ACCOUNTS
-        .map((a) => `<option value="${a}"${e.account === a ? ' selected' : ''}>${a}</option>`).join('')}</select></label>`
-    : `<label>Categoria<input type="text" data-f="category" list="cat-list" maxlength="60" value="${escapeAttr(e.category)}"></label>`;
+  const catNames = (e.scope === 'home' ? catCache.home : catCache.personal).map((c) => c.name);
+  const catField = `<label>Categoria<select data-f="category">${
+    optList(catNames, e.category, e.scope === 'home' ? null : '— nessuna —')
+  }</select></label>`;
+  const acctField = `<label>Conto<select data-f="account">${
+    optList(acctCache.map((a) => a.name), e.account, '— nessuno —')
+  }</select></label>`;
   return `
     <div class="tx editing" data-id="${e.id}" data-scope="${e.scope}">
       <div class="tx-edit-grid">
@@ -335,6 +342,7 @@ function editRow(e) {
         </select></label>
         <label>Importo (€)<input type="number" step="0.01" min="0" data-f="amount" value="${e.amount}"></label>
         ${catField}
+        ${acctField}
         <label style="grid-column:1/-1">Descrizione<input type="text" data-f="description" maxlength="500" value="${escapeAttr(e.description)}"></label>
       </div>
       <div class="tx-edit-actions">
@@ -423,8 +431,8 @@ form.addEventListener('submit', async (ev) => {
     kind: document.querySelector('input[name="kind"]:checked').value,
     amount: $('#amount').value,
     description: $('#description').value,
-    category: scope === 'home' ? catHomeSelect.value : catInput.value,
-    account: scope === 'home' ? accountHomeSelect.value : '',
+    category: scope === 'home' ? catHomeSelect.value : catSelect.value,
+    account: accountSelect.value,
     scope,
   };
 
@@ -442,9 +450,8 @@ form.addEventListener('submit', async (ev) => {
 
   $('#amount').value = '';
   $('#description').value = '';
-  catInput.value = '';
+  catSelect.value = '';
   categoryAuto = false;
-  hideSuggestion();
   $('#amount').focus();
   toast('Movimento aggiunto');
   reloadView();
@@ -538,44 +545,40 @@ async function loadDashboardCharts() {
   });
 }
 
-async function loadCategoryCharts(categories, accounts) {
+function loadCategoryChart(cats) {
   chartDefaults();
+  const data = cats.filter((c) => (c.month_expense || 0) > 0);
   catChart?.destroy();
   catChart = new Chart($('#chart-categories'), {
     type: 'doughnut',
     data: {
-      labels: categories.length ? categories.map((c) => c.category) : ['Nessuna spesa questo mese'],
+      labels: data.length ? data.map((c) => c.name) : ['Nessuna spesa questo mese'],
       datasets: [{
-        data: categories.length ? categories.map((c) => c.month_expense || c.expense || 0) : [1],
-        backgroundColor: categories.length
-          ? categories.map((c) => swatchColor(c.category))
-          : [cssVar('--line')],
+        data: data.length ? data.map((c) => c.month_expense) : [1],
+        backgroundColor: data.length ? data.map((c) => swatchColor(c.name)) : [cssVar('--line')],
         borderWidth: 0,
       }],
     },
-    options: doughnutOptions(categories.length > 0),
+    options: doughnutOptions(data.length > 0),
   });
+}
 
+async function loadAccountsChart() {
+  chartDefaults();
+  const accounts = await jfetch('/api/chart/accounts?scope=all').then((r) => r.json());
   acctChart?.destroy();
-  acctChart = null;
-  const wantAccounts = scope === 'home' || scope === 'all';
-  if (wantAccounts) {
-    const acctColors = { 'CONTO ANNA': '#e64980', 'CONTO MASSY': '#4263eb' };
-    acctChart = new Chart($('#chart-accounts'), {
-      type: 'doughnut',
-      data: {
-        labels: accounts.length ? accounts.map((a) => a.account) : ['Nessuna spesa di casa questo mese'],
-        datasets: [{
-          data: accounts.length ? accounts.map((a) => a.expense) : [1],
-          backgroundColor: accounts.length
-            ? accounts.map((a, i) => acctColors[a.account] || CAT_COLORS[i % CAT_COLORS.length])
-            : [cssVar('--line')],
-          borderWidth: 0,
-        }],
-      },
-      options: doughnutOptions(accounts.length > 0),
-    });
-  }
+  acctChart = new Chart($('#chart-accounts'), {
+    type: 'doughnut',
+    data: {
+      labels: accounts.length ? accounts.map((a) => a.account) : ['Nessuna spesa questo mese'],
+      datasets: [{
+        data: accounts.length ? accounts.map((a) => a.expense) : [1],
+        backgroundColor: accounts.length ? accounts.map((a) => swatchColor(a.account)) : [cssVar('--line')],
+        borderWidth: 0,
+      }],
+    },
+    options: doughnutOptions(accounts.length > 0),
+  });
 }
 
 /* ---------- Backup e ripristino ---------- */
@@ -663,45 +666,141 @@ async function loadDashboard() {
 }
 
 async function loadMovimenti() {
-  await Promise.all([loadSummary(), loadExpenses(), loadCategories(), loadModelNote()]);
+  await Promise.all([loadSummary(), loadExpenses(), loadAnagrafiche(), loadModelNote()]);
 }
 
-async function loadCategorieView() {
-  const wantAccounts = scope === 'home' || scope === 'all';
-  const [cats, accounts] = await Promise.all([
-    jfetch(withScope('/api/categories/summary')).then((r) => r.json()),
-    wantAccounts ? jfetch('/api/chart/accounts').then((r) => r.json()) : Promise.resolve([]),
-  ]);
+const rowActions = `
+  <div class="row-actions">
+    <button class="icon-btn r-edit" aria-label="Rinomina">${ic.edit}</button>
+    <button class="icon-btn r-del" aria-label="Elimina">${ic.trash}</button>
+  </div>`;
 
+async function loadCategorieView() {
+  const cats = await jfetch(withScope('/api/categories')).then((r) => r.json());
   const box = $('#cat-rows');
-  const expenseCats = cats.filter((c) => c.total_expense > 0 || c.month_expense > 0);
-  if (!expenseCats.length) {
-    box.innerHTML = '<div class="empty">Nessuna spesa categorizzata in questo ambito.</div>';
-  } else {
-    box.innerHTML = expenseCats.map((c) => `
-      <div class="cat-row">
-        <span class="dot" style="background:${swatchColor(c.category)}"></span>
-        <div>
-          <div class="c-name">${escapeHtml(c.category)}</div>
+  box.innerHTML = cats.length
+    ? cats.map((c) => `
+      <div class="cat-row" data-id="${c.id}" data-name="${escapeAttr(c.name)}">
+        <span class="dot" style="background:${swatchColor(c.name)}"></span>
+        <div class="c-main">
+          <div class="c-name">${escapeHtml(c.name)}${
+            scope === 'all' ? ` <span class="pill ${c.scope}">${c.scope === 'home' ? 'Casa' : 'Pers.'}</span>` : ''
+          }</div>
           <div class="c-count">${c.count} moviment${c.count === 1 ? 'o' : 'i'}</div>
         </div>
-        <div class="c-amt">
-          <b>${euro.format(c.month_expense)}</b>
-          <span>mese · ${euro.format(c.total_expense)} totale</span>
-        </div>
-      </div>`).join('');
-  }
+        <div class="c-amt"><b>${euro.format(c.month_expense)}</b><span>mese · ${euro.format(c.total_expense)} tot</span></div>
+        ${rowActions}
+      </div>`).join('')
+    : '<div class="empty">Nessuna categoria in questo ambito. Creane una.</div>';
+  loadCategoryChart(cats);
+}
 
-  // per le doughnut riuso il formato con month_expense
-  await loadCategoryCharts(
-    expenseCats.map((c) => ({ category: c.category, month_expense: c.month_expense })),
-    accounts,
-  );
+async function loadContiView() {
+  const accs = await jfetch('/api/accounts').then((r) => r.json());
+  acctCache = accs;
+  const box = $('#acct-rows');
+  box.innerHTML = accs.length
+    ? accs.map((a) => `
+      <div class="cat-row" data-id="${a.id}" data-name="${escapeAttr(a.name)}">
+        <span class="dot" style="background:${swatchColor(a.name)}"></span>
+        <div class="c-main">
+          <div class="c-name">${escapeHtml(a.name)}</div>
+          <div class="c-count">${a.count} moviment${a.count === 1 ? 'o' : 'i'}</div>
+        </div>
+        <div class="c-amt"><b>${euro.format(a.month_expense)}</b><span>mese · ${euro.format(a.total_expense)} tot</span></div>
+        ${rowActions}
+      </div>`).join('')
+    : '<div class="empty">Nessun conto. Aggiungine uno.</div>';
+  await loadAccountsChart();
 }
 
 async function loadBackupView() {
   await loadBackups();
 }
+
+/* ---------- Gestione categorie e conti ---------- */
+
+async function apiSend(url, method, body) {
+  const res = await jfetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Operazione non riuscita');
+  return data;
+}
+
+$('#cat-add').addEventListener('click', async () => {
+  const name = (prompt('Nome della nuova categoria:') || '').trim();
+  if (!name) return;
+  const sc = scope === 'home' ? 'home' : 'personal';
+  try {
+    await apiSend('/api/categories', 'POST', { name, scope: sc });
+    toast('Categoria aggiunta');
+    reloadView();
+  } catch (e) { showError(e.message); }
+});
+
+$('#acct-add').addEventListener('click', async () => {
+  const name = (prompt('Nome del nuovo conto:') || '').trim();
+  if (!name) return;
+  try {
+    await apiSend('/api/accounts', 'POST', { name });
+    toast('Conto aggiunto');
+    reloadView();
+  } catch (e) { showError(e.message); }
+});
+
+function bindManageRows(containerSel, base, labelSing) {
+  $(containerSel).addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button');
+    if (!btn) return;
+    const row = btn.closest('.cat-row');
+    const id = row.dataset.id;
+    const cur = row.dataset.name;
+    if (btn.classList.contains('r-edit')) {
+      const name = (prompt(`Nuovo nome per "${cur}":`, cur) || '').trim();
+      if (!name || name === cur) return;
+      try { await apiSend(`${base}/${id}`, 'PUT', { name }); toast('Rinominato'); reloadView(); }
+      catch (e) { showError(e.message); }
+    } else if (btn.classList.contains('r-del')) {
+      if (!confirm(`Eliminare ${labelSing} "${cur}"? I movimenti collegati restano, senza ${labelSing}.`)) return;
+      try {
+        const r = await apiSend(`${base}/${id}`, 'DELETE');
+        toast(r.cleared ? `Eliminato · ${r.cleared} movimenti aggiornati` : 'Eliminato');
+        reloadView();
+      } catch (e) { showError(e.message); }
+    }
+  });
+}
+bindManageRows('#cat-rows', '/api/categories', 'la categoria');
+bindManageRows('#acct-rows', '/api/accounts', 'il conto');
+
+// "+ nuova / + nuovo" accanto ai campi del form
+document.querySelectorAll('.mini-add').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const kind = btn.dataset.add; // 'category' | 'account'
+    const name = (prompt(kind === 'category' ? 'Nome della nuova categoria:' : 'Nome del nuovo conto:') || '').trim();
+    if (!name) return;
+    try {
+      if (kind === 'category') {
+        const sc = scope === 'home' ? 'home' : 'personal';
+        await apiSend('/api/categories', 'POST', { name, scope: sc });
+      } else {
+        await apiSend('/api/accounts', 'POST', { name });
+      }
+      await loadAnagrafiche();
+      if (kind === 'category') {
+        (scope === 'home' ? catHomeSelect : catSelect).value =
+          scope === 'home' ? name.toUpperCase() : name;
+      } else {
+        accountSelect.value = name;
+      }
+      toast('Aggiunto');
+    } catch (e) { showError(e.message); }
+  });
+});
 
 /* ---------- Bootstrap ---------- */
 

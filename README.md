@@ -9,16 +9,18 @@ Gira in Docker con un database PostgreSQL dedicato.
 - **Navigazione a sezioni** — menu laterale su desktop, barra in basso su smartphone:
   - **Dashboard** — riepiloghi oggi/settimana/mese, andamento 30 giorni e mensile
   - **Movimenti** — inserimento e elenco movimenti (righe con "pastiglia" colorata, modifica inline)
-  - **Categorie** — torta e riepilogo per categoria (spesa del mese e complessiva); per Casa anche per conto
+  - **Categorie** — **gestione categorie** (crea / rinomina / elimina) per ambito + torta e riepilogo
+  - **Conti** — **anagrafica conti correnti** (crea / rinomina / elimina) + spese per conto
   - **Backup** — export/import CSV e copie di sicurezza
-- **Switch ambito** (Personali / Casa / Totale) sempre in alto:
-  - **Personali** — categoria a testo libero con autocompletamento e **categoria suggerita**
-    da un modello predittivo (Naive Bayes) che si adatta mese dopo mese.
-  - **Casa** — categoria a scelta fissa tra **UTENZE**, **CONDOMINIO**, **VARIE** e
-    **conto** a scelta tra **CONTO ANNA** e **CONTO MASSY**.
+- **Switch ambito** (Personali / Casa / Totale) su Dashboard, Movimenti e Categorie:
+  - **Personali** — categoria dall'elenco gestito, con **categoria suggerita** da un
+    modello predittivo (Naive Bayes) che si adatta mese dopo mese.
+  - **Casa** — categoria obbligatoria dall'elenco gestito (seed: UTENZE / CONDOMINIO / VARIE).
   - **Totale** — sola lettura: spese personali + casa insieme, con confronto (mese e complessivo).
+- **Conto** facoltativo, associabile a qualsiasi spesa (personale o di casa).
 - Spese ed **entrate** (es. stipendio), con saldo.
-- Record **modificabili inline** ed eliminabili.
+- Record **modificabili inline** ed eliminabili. Rinominare una categoria/conto
+  aggiorna i movimenti collegati; eliminarla lascia i movimenti senza categoria/conto.
 - **Autenticazione** a sessione (cookie firmato), con protezione anti-brute-force.
 - **Backup CSV** automatico settimanale (lunedì 03:00, ultime 12 copie) + **import/ripristino** da CSV.
 

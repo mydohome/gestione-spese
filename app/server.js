@@ -14,9 +14,12 @@ const port = process.env.PORT || 3000;
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// Categorie e conti fissi: valgono SOLO per le spese di casa
-const HOME_CATEGORIES = ['UTENZE', 'CONDOMINIO', 'VARIE'];
-const HOME_ACCOUNTS = ['CONTO ANNA', 'CONTO MASSY'];
+// Categorie di casa create in automatico al primo avvio (poi gestibili dall'utente)
+const SEED_HOME_CATEGORIES = ['UTENZE', 'CONDOMINIO', 'VARIE'];
+const SEED_ACCOUNTS = ['CONTO ANNA', 'CONTO MASSY'];
+
+// Ambito di scrittura valido per una categoria
+const catScope = (s) => (s === 'home' ? 'home' : 'personal');
 
 // Ambito richiesto da una query di lettura: 'personal' (default), 'home' o 'all'
 const scopeParam = (req) => {
@@ -106,12 +109,74 @@ async function initDb() {
     ALTER TABLE expenses ADD CONSTRAINT expenses_scope_check CHECK (scope IN ('personal', 'home'));
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
     ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_account_check;
-    ALTER TABLE expenses ADD CONSTRAINT expenses_account_check CHECK (account IN ('', 'CONTO ANNA', 'CONTO MASSY'));
     CREATE INDEX IF NOT EXISTS expenses_spent_on_idx ON expenses (spent_on);
     CREATE INDEX IF NOT EXISTS expenses_category_idx ON expenses (category);
     CREATE INDEX IF NOT EXISTS expenses_scope_idx ON expenses (scope);
     CREATE INDEX IF NOT EXISTS expenses_account_idx ON expenses (account);
+
+    -- Anagrafica categorie (gestita dall'utente), per ambito
+    CREATE TABLE IF NOT EXISTS categories (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL,
+      scope      TEXT NOT NULL CHECK (scope IN ('personal', 'home')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS categories_scope_name_uidx ON categories (scope, lower(name));
+
+    -- Anagrafica conti correnti (gestita dall'utente), globale
+    CREATE TABLE IF NOT EXISTS accounts (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS accounts_name_uidx ON accounts (lower(name));
   `);
+
+  // Seed iniziale (idempotente)
+  for (const name of SEED_HOME_CATEGORIES) {
+    await pool.query(
+      `INSERT INTO categories (name, scope) VALUES ($1, 'home') ON CONFLICT DO NOTHING`, [name]
+    );
+  }
+  await pool.query(`
+    INSERT INTO categories (name, scope)
+    SELECT DISTINCT category, 'personal' FROM expenses WHERE scope = 'personal' AND category <> ''
+    ON CONFLICT DO NOTHING
+  `);
+  await pool.query(`
+    INSERT INTO categories (name, scope)
+    SELECT DISTINCT category, 'home' FROM expenses WHERE scope = 'home' AND category <> ''
+    ON CONFLICT DO NOTHING
+  `);
+  for (const name of SEED_ACCOUNTS) {
+    await pool.query(`INSERT INTO accounts (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]);
+  }
+  await pool.query(`
+    INSERT INTO accounts (name)
+    SELECT DISTINCT account FROM expenses WHERE account <> ''
+    ON CONFLICT DO NOTHING
+  `);
+}
+
+/* Nomi validi (in minuscolo) per categorie di un ambito e per i conti */
+async function validCategoryNames(scope) {
+  const { rows } = await pool.query('SELECT lower(name) AS n FROM categories WHERE scope = $1', [scope]);
+  return new Set(rows.map((r) => r.n));
+}
+async function validAccountNames() {
+  const { rows } = await pool.query('SELECT lower(name) AS n FROM accounts');
+  return new Set(rows.map((r) => r.n));
+}
+// Crea la categoria/conto se non esiste (usato in import)
+async function ensureCategory(client, name, scope) {
+  if (name) await client.query(
+    `INSERT INTO categories (name, scope) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [name, scope]
+  );
+}
+async function ensureAccount(client, name) {
+  if (name) await client.query(
+    `INSERT INTO accounts (name) VALUES ($1) ON CONFLICT DO NOTHING`, [name]
+  );
 }
 
 const SELECT_ROW = `
@@ -152,21 +217,12 @@ function parseBody(body) {
   if (!Number.isFinite(amt) || amt < 0) {
     return { error: 'Importo non valido: dev\'essere un numero >= 0.' };
   }
-  const sc = scope === 'home' ? 'home' : 'personal';
+  const sc = catScope(scope);
   let cat = String(category || '').trim().slice(0, 60);
-  let acc = String(account || '').trim().toUpperCase();
-  if (sc === 'home') {
-    // Le spese di casa hanno categoria e conto a scelta fissa
-    cat = cat.toUpperCase();
-    if (!HOME_CATEGORIES.includes(cat)) {
-      return { error: 'Per le spese di casa scegli una categoria: UTENZE, CONDOMINIO o VARIE.' };
-    }
-    if (!HOME_ACCOUNTS.includes(acc)) {
-      return { error: 'Per le spese di casa scegli il conto: CONTO ANNA o CONTO MASSY.' };
-    }
-  } else {
-    // Le spese personali usano categoria libera e non hanno il conto
-    acc = '';
+  if (sc === 'home') cat = cat.toUpperCase();
+  const acc = String(account || '').trim().slice(0, 60);
+  if (sc === 'home' && !cat) {
+    return { error: 'Per le spese di casa scegli una categoria.' };
   }
   return {
     value: {
@@ -179,6 +235,23 @@ function parseBody(body) {
       account: acc,
     },
   };
+}
+
+// Verifica che categoria (se presente) e conto (se presente) esistano in anagrafica
+async function checkRefs({ scope, category, account }) {
+  if (category) {
+    const cats = await validCategoryNames(scope);
+    if (!cats.has(category.toLowerCase())) {
+      return `Categoria "${category}" non presente. Aggiungila dal menu Categorie.`;
+    }
+  }
+  if (account) {
+    const accs = await validAccountNames();
+    if (!accs.has(account.toLowerCase())) {
+      return `Conto "${account}" non presente. Aggiungilo dal menu Conti.`;
+    }
+  }
+  return null;
 }
 
 /* ---------------- Rotte ---------------- */
@@ -203,6 +276,8 @@ app.post('/api/expenses', async (req, res, next) => {
   try {
     const parsed = parseBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const refErr = await checkRefs(parsed.value);
+    if (refErr) return res.status(400).json({ error: refErr });
     const { date, amount, description, kind, category, scope, account } = parsed.value;
     const { rows } = await pool.query(
       `INSERT INTO expenses (spent_on, amount, description, kind, category, scope, account)
@@ -223,6 +298,8 @@ app.put('/api/expenses/:id', async (req, res, next) => {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
     const parsed = parseBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const refErr = await checkRefs(parsed.value);
+    if (refErr) return res.status(400).json({ error: refErr });
     const { date, amount, description, kind, category, scope, account } = parsed.value;
     const { rows } = await pool.query(
       `UPDATE expenses
@@ -251,18 +328,183 @@ app.delete('/api/expenses/:id', async (req, res, next) => {
   }
 });
 
-// Categorie gia' usate (per autocompletamento e filtri)
+/* ---------------- Anagrafica categorie ---------------- */
+
+// Elenco categorie di un ambito, con conteggio e importi (per form e per la vista Categorie).
+// scope: 'personal' | 'home' | 'all'
 app.get('/api/categories', async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT category, COUNT(*)::int AS n
-       FROM expenses WHERE category <> '' AND ($1 = 'all' OR scope = $1)
-       GROUP BY category ORDER BY n DESC, category`,
-      [scopeParam(req)]
-    );
-    res.json(rows.map((r) => r.category));
+    const sc = scopeParam(req);
+    const { rows } = await pool.query(`
+      SELECT c.id, c.name, c.scope,
+             COUNT(e.id)::int AS count,
+             COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'expense'), 0)::float8 AS total_expense,
+             COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'expense' AND e.spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense
+      FROM categories c
+      LEFT JOIN expenses e ON e.scope = c.scope AND lower(e.category) = lower(c.name)
+      WHERE ($1 = 'all' OR c.scope = $1)
+      GROUP BY c.id, c.name, c.scope
+      ORDER BY c.scope, c.name
+    `, [sc]);
+    res.json(rows);
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/api/categories', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    const scope = catScope(req.body?.scope);
+    if (!name) return res.status(400).json({ error: 'Nome categoria mancante.' });
+    const norm = scope === 'home' ? name.toUpperCase() : name;
+    const { rows } = await pool.query(
+      `INSERT INTO categories (name, scope) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING RETURNING id, name, scope`,
+      [norm, scope]
+    );
+    if (!rows.length) return res.status(409).json({ error: 'Categoria già esistente in questo ambito.' });
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put('/api/categories/:id', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    if (!name) return res.status(400).json({ error: 'Nome categoria mancante.' });
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT name, scope FROM categories WHERE id = $1', [id]);
+    if (!cur.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Categoria non trovata' }); }
+    const { name: oldName, scope } = cur.rows[0];
+    const norm = scope === 'home' ? name.toUpperCase() : name;
+    const dup = await client.query(
+      'SELECT 1 FROM categories WHERE scope = $1 AND lower(name) = lower($2) AND id <> $3',
+      [scope, norm, id]
+    );
+    if (dup.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Esiste già una categoria con questo nome.' }); }
+    await client.query('UPDATE categories SET name = $1 WHERE id = $2', [norm, id]);
+    await client.query(
+      'UPDATE expenses SET category = $1 WHERE scope = $2 AND lower(category) = lower($3)',
+      [norm, scope, oldName]
+    );
+    await client.query('COMMIT');
+    modelDirty = true;
+    res.json({ id, name: norm, scope });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/categories/:id', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT name, scope FROM categories WHERE id = $1', [id]);
+    if (!cur.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Categoria non trovata' }); }
+    const { name, scope } = cur.rows[0];
+    // I movimenti restano, senza categoria
+    const upd = await client.query(
+      "UPDATE expenses SET category = '' WHERE scope = $1 AND lower(category) = lower($2)",
+      [scope, name]
+    );
+    await client.query('DELETE FROM categories WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    modelDirty = true;
+    res.json({ ok: true, cleared: upd.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/* ---------------- Anagrafica conti ---------------- */
+
+app.get('/api/accounts', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT a.id, a.name,
+             COUNT(e.id)::int AS count,
+             COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'expense'), 0)::float8 AS total_expense,
+             COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'expense' AND e.spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense
+      FROM accounts a
+      LEFT JOIN expenses e ON lower(e.account) = lower(a.name)
+      GROUP BY a.id, a.name
+      ORDER BY a.name
+    `);
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/accounts', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    if (!name) return res.status(400).json({ error: 'Nome conto mancante.' });
+    const { rows } = await pool.query(
+      `INSERT INTO accounts (name) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id, name`,
+      [name]
+    );
+    if (!rows.length) return res.status(409).json({ error: 'Conto già esistente.' });
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put('/api/accounts/:id', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    if (!name) return res.status(400).json({ error: 'Nome conto mancante.' });
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT name FROM accounts WHERE id = $1', [id]);
+    if (!cur.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Conto non trovato' }); }
+    const dup = await client.query('SELECT 1 FROM accounts WHERE lower(name) = lower($1) AND id <> $2', [name, id]);
+    if (dup.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Esiste già un conto con questo nome.' }); }
+    await client.query('UPDATE accounts SET name = $1 WHERE id = $2', [name, id]);
+    await client.query('UPDATE expenses SET account = $1 WHERE lower(account) = lower($2)', [name, cur.rows[0].name]);
+    await client.query('COMMIT');
+    res.json({ id, name });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/accounts/:id', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT name FROM accounts WHERE id = $1', [id]);
+    if (!cur.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Conto non trovato' }); }
+    const upd = await client.query("UPDATE expenses SET account = '' WHERE lower(account) = lower($1)", [cur.rows[0].name]);
+    await client.query('DELETE FROM accounts WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, cleared: upd.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
   }
 });
 
@@ -404,35 +646,17 @@ app.get('/api/chart/categories', async (req, res, next) => {
   }
 });
 
-// Riepilogo per categoria (vista Categorie): conteggio, spesa del mese e complessiva
-app.get('/api/categories/summary', async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT COALESCE(NULLIF(category, ''), 'Senza categoria') AS category,
-             COUNT(*)::int AS count,
-             COALESCE(SUM(amount) FILTER (WHERE kind = 'expense'), 0)::float8 AS total_expense,
-             COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)::float8 AS total_income,
-             COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense
-      FROM expenses
-      WHERE ($1 = 'all' OR scope = $1)
-      GROUP BY 1 ORDER BY total_expense DESC, category
-    `, [scopeParam(req)]);
-    res.json(rows);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Spese di casa per conto, nel mese corrente
+// Spese per conto nel mese corrente (per la vista Conti e i grafici)
 app.get('/api/chart/accounts', async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
       SELECT account, SUM(amount)::float8 AS expense
       FROM expenses
-      WHERE kind = 'expense' AND scope = 'home' AND account <> ''
+      WHERE kind = 'expense' AND account <> ''
         AND spent_on >= date_trunc('month', CURRENT_DATE)
+        AND ($1 = 'all' OR scope = $1)
       GROUP BY account ORDER BY expense DESC
-    `);
+    `, [scopeParam(req)]);
     res.json(rows);
   } catch (err) {
     next(err);
@@ -530,6 +754,9 @@ app.post('/api/import', express.text({ type: '*/*', limit: '15mb' }), async (req
         );
         if (dup.rowCount) { skipped++; continue; }
       }
+      // Categorie/conti dal CSV vengono create in anagrafica se non esistono
+      await ensureCategory(client, v.category, v.scope);
+      await ensureAccount(client, v.account);
       await client.query(
         `INSERT INTO expenses (spent_on, amount, description, kind, category, scope, account)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
