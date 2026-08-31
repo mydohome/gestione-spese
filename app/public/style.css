@@ -31,6 +31,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -104,6 +105,44 @@ body {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
+
+/* Pannello di confronto Personali / Casa (tab Totale) */
+.split {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.15rem 1.25rem 1.3rem; margin-bottom: 1.5rem;
+}
+.split h2 { margin: 0 0 .9rem; font-size: 1.05rem; }
+.split__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.split__cell {
+  display: flex; flex-direction: column; gap: .3rem;
+  padding: .9rem 1rem; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--panel-2);
+}
+.split__cell--sum { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.split__label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+.split__val { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.split__sub { color: var(--muted); font-size: .8rem; }
+.split__sub b { color: var(--text); font-variant-numeric: tabular-nums; }
+@media (max-width: 620px) { .split__grid { grid-template-columns: 1fr; } }
+
+/* Chip ambito nell'elenco (tab Totale) */
+.scope-chip {
+  display: inline-block; padding: .1rem .45rem; border-radius: 999px;
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+.scope-chip.home { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.scope-chip.personal { color: var(--muted); background: var(--panel-2); }
+
+/* Tag conto nell'elenco */
+.acct-tag {
+  display: inline-block; margin-left: .35rem; padding: .1rem .45rem;
+  border-radius: 8px; font-size: .72rem; font-weight: 600;
+  color: var(--muted); background: var(--panel-2); border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.list .edit-input--stack { margin-top: .3rem; }
 
 .panel, .box, .form, .chart-card, .list-wrap {
   background: var(--panel);

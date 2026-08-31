@@ -6,13 +6,17 @@ Gira in Docker con un database PostgreSQL dedicato.
 
 ## Funzionalità
 
-- **Due ambiti separati** con tab dedicati:
+- **Tre tab**:
   - **Personali** — categoria a testo libero con autocompletamento e **categoria suggerita**
     da un modello predittivo (Naive Bayes) che si adatta mese dopo mese.
-  - **Casa** — categoria a scelta fissa tra **UTENZE**, **CONDOMINIO**, **VARIE**.
+  - **Casa** — categoria a scelta fissa tra **UTENZE**, **CONDOMINIO**, **VARIE** e
+    **conto** a scelta tra **CONTO ANNA** e **CONTO MASSY**.
+  - **Totale** — riepilogo di sola lettura con spese personali + casa insieme e
+    confronto Personali / Casa (mese e complessivo).
 - Spese ed **entrate** (es. stipendio), con saldo.
-- Riepiloghi **oggi / settimana / mese** e totale complessivo, filtrati per ambito.
-- Grafici: andamento ultimi 30 giorni, andamento mensile con saldo, torta categorie del mese.
+- Riepiloghi **oggi / settimana / mese** e totale complessivo, filtrati per tab.
+- Grafici: andamento ultimi 30 giorni, andamento mensile con saldo, torta categorie
+  del mese e, per Casa/Totale, torta delle spese di casa per conto.
 - Record **modificabili inline** ed eliminabili.
 - **Autenticazione** a sessione (cookie firmato), con protezione anti-brute-force.
 - **Backup CSV** automatico settimanale (lunedì 03:00, ultime 12 copie) + **import/ripristino** da CSV.

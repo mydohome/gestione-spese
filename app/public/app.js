@@ -41,15 +41,17 @@ const rowsEl = $('#rows');
 const catInput = $('#category');
 const catSuggestBtn = $('#cat-suggest');
 const catHomeSelect = $('#category-home');
+const accountHomeSelect = $('#account-home');
 
 const HOME_CATEGORIES = ['UTENZE', 'CONDOMINIO', 'VARIE'];
+const HOME_ACCOUNTS = ['CONTO ANNA', 'CONTO MASSY'];
 
 let expenses = [];
 let editingId = null;
-let dailyChart, monthlyChart, catChart;
+let dailyChart, monthlyChart, catChart, acctChart;
 let predictTimer = null;
 let categoryAuto = false; // true se la categoria e' stata compilata dal modello e non ancora toccata
-let scope = 'personal';   // ambito attivo: 'personal' | 'home'
+let scope = 'personal';   // ambito attivo: 'personal' | 'home' | 'all'
 
 // Aggiunge ?scope= alle chiamate che dipendono dal tab attivo
 const withScope = (url) => url + (url.includes('?') ? '&' : '?') + 'scope=' + scope;
@@ -58,9 +60,15 @@ const withScope = (url) => url + (url.includes('?') ? '&' : '?') + 'scope=' + sc
 
 function applyScopeUI() {
   const home = scope === 'home';
-  $('#cat-field-personal').hidden = home;
+  const all = scope === 'all';
+  // Il tab "Totale" è di sola lettura: niente form di inserimento
+  form.hidden = all;
+  $('#cat-field-personal').hidden = !(scope === 'personal');
   $('#cat-field-home').hidden = !home;
-  if (home) {
+  $('#conto-field-home').hidden = !home;
+  $('#split-panel').hidden = !all;
+  $('#card-accounts').hidden = !(home || all);
+  if (scope !== 'personal') {
     hideSuggestion();
     $('#model-note').hidden = true;
   }
@@ -106,18 +114,30 @@ async function loadSummary() {
   $('#list-total').textContent = s.count
     ? `${s.count} movimenti · spese ${euro.format(s.total.expense)} · entrate ${euro.format(s.total.income)} · saldo ${euro.format(s.total.balance)}`
     : '';
+
+  if (scope === 'all' && s.byScope) {
+    const p = s.byScope.personal, h = s.byScope.home;
+    $('#split-personal-month').textContent = euro.format(p.month.expense);
+    $('#split-personal-total').textContent = euro.format(p.total.expense);
+    $('#split-home-month').textContent = euro.format(h.month.expense);
+    $('#split-home-total').textContent = euro.format(h.total.expense);
+    $('#split-all-month').textContent = euro.format(p.month.expense + h.month.expense);
+    $('#split-all-total').textContent = euro.format(p.total.expense + h.total.expense);
+  }
 }
 
 /* ---------- Categorie e modello predittivo ---------- */
 
 async function loadCategories() {
-  const cats = await jfetch(withScope('/api/categories')).then((r) => r.json());
+  // Il datalist serve solo alle spese personali (categoria libera):
+  // le spese di casa hanno categorie fisse e non usano l'autocompletamento.
+  const cats = await jfetch('/api/categories?scope=personal').then((r) => r.json());
   $('#cat-list').innerHTML = cats.map((c) => `<option value="${escapeAttr(c)}"></option>`).join('');
 }
 
 async function loadModelNote() {
   const note = $('#model-note');
-  if (scope === 'home') { note.hidden = true; return; }
+  if (scope !== 'personal') { note.hidden = true; return; }
   const m = await jfetch('/api/model').then((r) => r.json());
   if (m.trained) {
     const acc = m.accuracy != null ? ` · precisione stimata ${Math.round(m.accuracy * 100)}%` : '';
@@ -144,7 +164,7 @@ function hideSuggestion() {
 }
 
 async function runPrediction() {
-  if (scope === 'home') return hideSuggestion();
+  if (scope !== 'personal') return hideSuggestion();
   const draft = currentDraft();
   if (!draft.description.trim() && !draft.amount) return hideSuggestion();
 
@@ -195,14 +215,20 @@ $('#date').addEventListener('change', schedulePrediction);
 function viewRow(e) {
   const sign = e.kind === 'income' ? '+' : '−';
   const label = e.kind === 'income' ? 'Entrata' : 'Spesa';
+  const scopeChip = scope === 'all'
+    ? `<span class="scope-chip ${e.scope}">${e.scope === 'home' ? 'Casa' : 'Pers.'}</span> `
+    : '';
   const cat = e.category
     ? `<span class="cat-tag">${escapeHtml(e.category)}</span>`
     : '<span class="date">—</span>';
+  const acct = e.account
+    ? `<span class="acct-tag">${escapeHtml(e.account)}</span>`
+    : '';
   return `
     <tr data-id="${e.id}">
       <td class="date">${fmtDate(e.spent_on)}</td>
-      <td><span class="badge ${e.kind}">${label}</span></td>
-      <td>${cat}</td>
+      <td>${scopeChip}<span class="badge ${e.kind}">${label}</span></td>
+      <td>${cat}${acct}</td>
       <td>${escapeHtml(e.description) || '<span class="date">—</span>'}</td>
       <td class="num amount ${e.kind}">${sign} ${euro.format(e.amount)}</td>
       <td class="num">
@@ -218,6 +244,9 @@ function editRow(e) {
   const catField = e.scope === 'home'
     ? `<select class="edit-input" data-f="category">${HOME_CATEGORIES
         .map((c) => `<option value="${c}"${e.category === c ? ' selected' : ''}>${c}</option>`)
+        .join('')}</select>
+       <select class="edit-input edit-input--stack" data-f="account">${HOME_ACCOUNTS
+        .map((a) => `<option value="${a}"${e.account === a ? ' selected' : ''}>${a}</option>`)
         .join('')}</select>`
     : `<input type="text" class="edit-input" data-f="category" list="cat-list" maxlength="60" value="${escapeAttr(e.category)}">`;
   return `
@@ -282,7 +311,10 @@ rowsEl.addEventListener('click', async (ev) => {
     return;
   }
   if (btn.classList.contains('save')) {
-    const val = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    const val = (f) => {
+      const el = tr.querySelector(`[data-f="${f}"]`);
+      return el ? el.value : '';
+    };
     const payload = {
       date: val('date'),
       kind: val('kind'),
@@ -290,6 +322,7 @@ rowsEl.addEventListener('click', async (ev) => {
       amount: val('amount'),
       description: val('description'),
       scope: tr.dataset.scope || 'personal',
+      account: val('account'),
     };
     const res = await jfetch(`/api/expenses/${id}`, {
       method: 'PUT',
@@ -319,6 +352,7 @@ form.addEventListener('submit', async (ev) => {
     amount: $('#amount').value,
     description: $('#description').value,
     category: scope === 'home' ? catHomeSelect.value : catInput.value,
+    account: scope === 'home' ? accountHomeSelect.value : '',
     scope,
   };
 
@@ -364,10 +398,12 @@ function barLineOptions() {
 }
 
 async function loadCharts() {
-  const [daily, monthly, categories] = await Promise.all([
+  const wantAccounts = scope === 'home' || scope === 'all';
+  const [daily, monthly, categories, accounts] = await Promise.all([
     jfetch(withScope('/api/chart/daily?days=30')).then((r) => r.json()),
     jfetch(withScope('/api/chart/monthly?months=12')).then((r) => r.json()),
     jfetch(withScope('/api/chart/categories')).then((r) => r.json()),
+    wantAccounts ? jfetch('/api/chart/accounts').then((r) => r.json()) : Promise.resolve([]),
   ]);
 
   const expenseColor = cssVar('--expense');
@@ -441,6 +477,37 @@ async function loadCharts() {
       },
     },
   });
+
+  acctChart?.destroy();
+  acctChart = null;
+  if (wantAccounts) {
+    const acctColors = { 'CONTO ANNA': '#e84393', 'CONTO MASSY': '#0984e3' };
+    acctChart = new Chart($('#chart-accounts'), {
+      type: 'doughnut',
+      data: {
+        labels: accounts.length ? accounts.map((a) => a.account) : ['Nessuna spesa di casa questo mese'],
+        datasets: [{
+          data: accounts.length ? accounts.map((a) => a.expense) : [1],
+          backgroundColor: accounts.length
+            ? accounts.map((a, i) => acctColors[a.account] || CAT_COLORS[i % CAT_COLORS.length])
+            : [cssVar('--border')],
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '58%',
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true } },
+          tooltip: {
+            enabled: accounts.length > 0,
+            callbacks: { label: (ctx) => `${ctx.label}: ${euro.format(ctx.parsed)}` },
+          },
+        },
+      },
+    });
+  }
 }
 
 /* ---------- Backup e ripristino ---------- */

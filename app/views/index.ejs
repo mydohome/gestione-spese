@@ -17,6 +17,7 @@
     <nav class="tabs" role="tablist" aria-label="Ambito spese">
       <button type="button" class="tab is-active" data-scope="personal" role="tab" aria-selected="true">Personali</button>
       <button type="button" class="tab" data-scope="home" role="tab" aria-selected="false">Casa</button>
+      <button type="button" class="tab" data-scope="all" role="tab" aria-selected="false">Totale</button>
     </nav>
 
     <section class="summary" aria-label="Riepiloghi">
@@ -44,6 +45,27 @@
           <span>Saldo <b class="bal" id="sum-month-bal">—</b></span>
         </span>
       </article>
+    </section>
+
+    <section class="split" id="split-panel" hidden aria-label="Personali e Casa a confronto">
+      <h2>Personali e Casa a confronto</h2>
+      <div class="split__grid">
+        <div class="split__cell">
+          <span class="split__label">Personali · mese</span>
+          <span class="split__val" id="split-personal-month">—</span>
+          <span class="split__sub">complessivo <b id="split-personal-total">—</b></span>
+        </div>
+        <div class="split__cell">
+          <span class="split__label">Casa · mese</span>
+          <span class="split__val" id="split-home-month">—</span>
+          <span class="split__sub">complessivo <b id="split-home-total">—</b></span>
+        </div>
+        <div class="split__cell split__cell--sum">
+          <span class="split__label">Totale · mese</span>
+          <span class="split__val" id="split-all-month">—</span>
+          <span class="split__sub">complessivo <b id="split-all-total">—</b></span>
+        </div>
+      </div>
     </section>
 
     <form class="form" id="form">
@@ -78,6 +100,13 @@
           <option value="VARIE">VARIE</option>
         </select>
       </div>
+      <div class="field" id="conto-field-home" hidden>
+        <label for="account-home">Conto</label>
+        <select id="account-home" name="account-home" class="select select--form">
+          <option value="CONTO ANNA">CONTO ANNA</option>
+          <option value="CONTO MASSY">CONTO MASSY</option>
+        </select>
+      </div>
       <button type="submit" class="btn">Aggiungi</button>
     </form>
     <p class="error" id="error" hidden></p>
@@ -97,6 +126,10 @@
       <article class="chart-card">
         <h2>Categorie del mese</h2>
         <div class="chart-box"><canvas id="chart-categories"></canvas></div>
+      </article>
+      <article class="chart-card" id="card-accounts" hidden>
+        <h2>Casa · per conto (mese)</h2>
+        <div class="chart-box"><canvas id="chart-accounts"></canvas></div>
       </article>
     </section>
 

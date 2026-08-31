@@ -6,7 +6,7 @@ const { toCSV } = require('./csv');
 
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, 'backups');
 const KEEP = Number(process.env.BACKUP_KEEP) || 12; // settimane di storico
-const COLUMNS = ['spent_on', 'kind', 'amount', 'description', 'category', 'scope', 'created_at'];
+const COLUMNS = ['spent_on', 'kind', 'amount', 'description', 'category', 'scope', 'account', 'created_at'];
 const FILE_RE = /^expenses-\d{4}-\d{2}-\d{2}\.csv$/;
 
 async function exportRows(pool) {
@@ -17,6 +17,7 @@ async function exportRows(pool) {
            description,
            category,
            scope,
+           account,
            to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at
     FROM expenses
     ORDER BY spent_on, id

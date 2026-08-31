@@ -14,8 +14,9 @@ const port = process.env.PORT || 3000;
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// Categorie fisse per le spese di casa
+// Categorie e conti fissi: valgono SOLO per le spese di casa
 const HOME_CATEGORIES = ['UTENZE', 'CONDOMINIO', 'VARIE'];
+const HOME_ACCOUNTS = ['CONTO ANNA', 'CONTO MASSY'];
 
 // Ambito richiesto da una query di lettura: 'personal' (default), 'home' o 'all'
 const scopeParam = (req) => {
@@ -103,9 +104,13 @@ async function initDb() {
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'personal';
     ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_scope_check;
     ALTER TABLE expenses ADD CONSTRAINT expenses_scope_check CHECK (scope IN ('personal', 'home'));
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS account TEXT NOT NULL DEFAULT '';
+    ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_account_check;
+    ALTER TABLE expenses ADD CONSTRAINT expenses_account_check CHECK (account IN ('', 'CONTO ANNA', 'CONTO MASSY'));
     CREATE INDEX IF NOT EXISTS expenses_spent_on_idx ON expenses (spent_on);
     CREATE INDEX IF NOT EXISTS expenses_category_idx ON expenses (category);
     CREATE INDEX IF NOT EXISTS expenses_scope_idx ON expenses (scope);
+    CREATE INDEX IF NOT EXISTS expenses_account_idx ON expenses (account);
   `);
 }
 
@@ -116,7 +121,8 @@ const SELECT_ROW = `
   description,
   kind,
   category,
-  scope
+  scope,
+  account
 `;
 
 /* ---------------- Modello predittivo ---------------- */
@@ -138,7 +144,7 @@ async function ensureModel() {
 /* ---------------- Validazione ---------------- */
 
 function parseBody(body) {
-  const { date, amount, description, kind, category, scope } = body || {};
+  const { date, amount, description, kind, category, scope, account } = body || {};
   const amt = Number(amount);
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return { error: 'Data non valida (formato YYYY-MM-DD).' };
@@ -148,11 +154,19 @@ function parseBody(body) {
   }
   const sc = scope === 'home' ? 'home' : 'personal';
   let cat = String(category || '').trim().slice(0, 60);
+  let acc = String(account || '').trim().toUpperCase();
   if (sc === 'home') {
+    // Le spese di casa hanno categoria e conto a scelta fissa
     cat = cat.toUpperCase();
     if (!HOME_CATEGORIES.includes(cat)) {
       return { error: 'Per le spese di casa scegli una categoria: UTENZE, CONDOMINIO o VARIE.' };
     }
+    if (!HOME_ACCOUNTS.includes(acc)) {
+      return { error: 'Per le spese di casa scegli il conto: CONTO ANNA o CONTO MASSY.' };
+    }
+  } else {
+    // Le spese personali usano categoria libera e non hanno il conto
+    acc = '';
   }
   return {
     value: {
@@ -162,6 +176,7 @@ function parseBody(body) {
       kind: kind === 'income' ? 'income' : 'expense',
       category: cat,
       scope: sc,
+      account: acc,
     },
   };
 }
@@ -188,12 +203,12 @@ app.post('/api/expenses', async (req, res, next) => {
   try {
     const parsed = parseBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    const { date, amount, description, kind, category, scope } = parsed.value;
+    const { date, amount, description, kind, category, scope, account } = parsed.value;
     const { rows } = await pool.query(
-      `INSERT INTO expenses (spent_on, amount, description, kind, category, scope)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO expenses (spent_on, amount, description, kind, category, scope, account)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING ${SELECT_ROW}`,
-      [date, amount, description, kind, category, scope]
+      [date, amount, description, kind, category, scope, account]
     );
     modelDirty = true;
     res.status(201).json(rows[0]);
@@ -208,13 +223,13 @@ app.put('/api/expenses/:id', async (req, res, next) => {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
     const parsed = parseBody(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    const { date, amount, description, kind, category, scope } = parsed.value;
+    const { date, amount, description, kind, category, scope, account } = parsed.value;
     const { rows } = await pool.query(
       `UPDATE expenses
-       SET spent_on = $1, amount = $2, description = $3, kind = $4, category = $5, scope = $6
-       WHERE id = $7
+       SET spent_on = $1, amount = $2, description = $3, kind = $4, category = $5, scope = $6, account = $7
+       WHERE id = $8
        RETURNING ${SELECT_ROW}`,
-      [date, amount, description, kind, category, scope, id]
+      [date, amount, description, kind, category, scope, account, id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Movimento non trovato' });
     modelDirty = true;
@@ -302,12 +317,34 @@ app.get('/api/summary', async (req, res, next) => {
     `, [scopeParam(req)]);
     const r = rows[0];
     const period = (e, i) => ({ expense: e, income: i, balance: +(i - e).toFixed(2) });
+
+    // Ripartizione Personali / Casa (mese corrente e complessivo), per il tab Totale
+    const { rows: split } = await pool.query(`
+      SELECT scope,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_income,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense'), 0)::float8 AS total_expense,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)::float8  AS total_income
+      FROM expenses GROUP BY scope
+    `);
+    const byScope = { personal: null, home: null };
+    for (const s of split) {
+      byScope[s.scope] = {
+        month: period(s.month_expense, s.month_income),
+        total: period(s.total_expense, s.total_income),
+      };
+    }
+    const empty = { month: period(0, 0), total: period(0, 0) };
+    byScope.personal = byScope.personal || empty;
+    byScope.home = byScope.home || empty;
+
     res.json({
       day: period(r.day_expense, r.day_income),
       week: period(r.week_expense, r.week_income),
       month: period(r.month_expense, r.month_income),
       total: period(r.total_expense, r.total_income),
       count: r.count,
+      byScope,
     });
   } catch (err) {
     next(err);
@@ -361,6 +398,22 @@ app.get('/api/chart/categories', async (req, res, next) => {
         AND ($1 = 'all' OR scope = $1)
       GROUP BY 1 ORDER BY expense DESC
     `, [scopeParam(req)]);
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Spese di casa per conto, nel mese corrente
+app.get('/api/chart/accounts', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT account, SUM(amount)::float8 AS expense
+      FROM expenses
+      WHERE kind = 'expense' AND scope = 'home' AND account <> ''
+        AND spent_on >= date_trunc('month', CURRENT_DATE)
+      GROUP BY account ORDER BY expense DESC
+    `);
     res.json(rows);
   } catch (err) {
     next(err);
@@ -435,6 +488,7 @@ app.post('/api/import', express.text({ type: '*/*', limit: '15mb' }), async (req
         kind: String(rec.kind || 'expense').trim(),
         category: rec.category || '',
         scope: String(rec.scope || 'personal').trim(),
+        account: rec.account || '',
       });
       if (p.error) invalid.push({ line: i + 2, error: p.error });
       else valid.push(p.value);
@@ -452,15 +506,15 @@ app.post('/api/import', express.text({ type: '*/*', limit: '15mb' }), async (req
       if (mode === 'merge') {
         const dup = await client.query(
           `SELECT 1 FROM expenses
-           WHERE spent_on=$1 AND kind=$2 AND amount=$3 AND description=$4 AND category=$5 AND scope=$6 LIMIT 1`,
-          [v.date, v.kind, v.amount, v.description, v.category, v.scope]
+           WHERE spent_on=$1 AND kind=$2 AND amount=$3 AND description=$4 AND category=$5 AND scope=$6 AND account=$7 LIMIT 1`,
+          [v.date, v.kind, v.amount, v.description, v.category, v.scope, v.account]
         );
         if (dup.rowCount) { skipped++; continue; }
       }
       await client.query(
-        `INSERT INTO expenses (spent_on, amount, description, kind, category, scope)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [v.date, v.amount, v.description, v.kind, v.category, v.scope]
+        `INSERT INTO expenses (spent_on, amount, description, kind, category, scope, account)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [v.date, v.amount, v.description, v.kind, v.category, v.scope, v.account]
       );
       inserted++;
     }
