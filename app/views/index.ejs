@@ -2,183 +2,194 @@
 <html lang="it">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1220">
   <title>Le mie spese</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="wrap">
-    <header class="head">
-      <button type="button" class="logout" id="logout">Esci</button>
-      <h1>Le mie spese</h1>
-      <p>Annota spese ed entrate con una categoria. Riepiloghi, grafici e categoria suggerita si aggiornano da soli.</p>
+  <div class="app-wrap">
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#6c8cff"/><stop offset="1" stop-color="#12b886"/>
+            </linearGradient>
+          </defs>
+          <rect width="40" height="40" rx="11" fill="url(#lg)"/>
+          <path d="M8 26c4 0 4-6 8-6s4 8 8 8 4-12 10-12" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+          <circle cx="28" cy="14" r="3.4" fill="#fff"/>
+        </svg>
+        <span>Le mie spese</span>
+      </div>
+      <button type="button" class="btn ghost" id="logout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Esci
+      </button>
     </header>
 
-    <nav class="tabs" role="tablist" aria-label="Ambito spese">
-      <button type="button" class="tab is-active" data-scope="personal" role="tab" aria-selected="true">Personali</button>
-      <button type="button" class="tab" data-scope="home" role="tab" aria-selected="false">Casa</button>
-      <button type="button" class="tab" data-scope="all" role="tab" aria-selected="false">Totale</button>
-    </nav>
-
-    <section class="summary" aria-label="Riepiloghi">
-      <article class="box">
-        <span class="box__label">Oggi</span>
-        <span class="box__value" id="sum-day">—</span>
-        <span class="box__sub">
-          <span>Entrate <b id="sum-day-in">—</b></span>
-          <span>Saldo <b class="bal" id="sum-day-bal">—</b></span>
-        </span>
-      </article>
-      <article class="box">
-        <span class="box__label">Questa settimana</span>
-        <span class="box__value" id="sum-week">—</span>
-        <span class="box__sub">
-          <span>Entrate <b id="sum-week-in">—</b></span>
-          <span>Saldo <b class="bal" id="sum-week-bal">—</b></span>
-        </span>
-      </article>
-      <article class="box">
-        <span class="box__label">Questo mese</span>
-        <span class="box__value" id="sum-month">—</span>
-        <span class="box__sub">
-          <span>Entrate <b id="sum-month-in">—</b></span>
-          <span>Saldo <b class="bal" id="sum-month-bal">—</b></span>
-        </span>
-      </article>
-    </section>
-
-    <section class="split" id="split-panel" hidden aria-label="Personali e Casa a confronto">
-      <h2>Personali e Casa a confronto</h2>
-      <div class="split__grid">
-        <div class="split__cell">
-          <span class="split__label">Personali · mese</span>
-          <span class="split__val" id="split-personal-month">—</span>
-          <span class="split__sub">complessivo <b id="split-personal-total">—</b></span>
+    <main class="main">
+      <div class="page-head">
+        <div>
+          <h1 id="page-title">Personali</h1>
+          <p id="page-sub">Spese ed entrate personali</p>
         </div>
-        <div class="split__cell">
-          <span class="split__label">Casa · mese</span>
-          <span class="split__val" id="split-home-month">—</span>
-          <span class="split__sub">complessivo <b id="split-home-total">—</b></span>
-        </div>
-        <div class="split__cell split__cell--sum">
-          <span class="split__label">Totale · mese</span>
-          <span class="split__val" id="split-all-month">—</span>
-          <span class="split__sub">complessivo <b id="split-all-total">—</b></span>
+        <div class="segment" id="tabs" role="tablist" aria-label="Ambito">
+          <button type="button" class="tab active" data-scope="personal" role="tab" aria-selected="true">Personali</button>
+          <button type="button" class="tab" data-scope="home" role="tab" aria-selected="false">Casa</button>
+          <button type="button" class="tab" data-scope="all" role="tab" aria-selected="false">Totale</button>
         </div>
       </div>
-    </section>
 
-    <form class="form" id="form">
-      <div class="seg" role="group" aria-label="Tipo movimento">
-        <input type="radio" name="kind" id="kind-expense" value="expense" checked>
-        <label for="kind-expense">Spesa</label>
-        <input type="radio" name="kind" id="kind-income" value="income">
-        <label for="kind-income">Entrata</label>
+      <div class="grid cols-3" aria-label="Riepiloghi">
+        <article class="card stat expense">
+          <span class="label">Oggi</span>
+          <span class="value" id="sum-day">—</span>
+          <span class="sub">entrate <b id="sum-day-in">—</b> · saldo <b class="bal" id="sum-day-bal">—</b></span>
+        </article>
+        <article class="card stat expense">
+          <span class="label">Questa settimana</span>
+          <span class="value" id="sum-week">—</span>
+          <span class="sub">entrate <b id="sum-week-in">—</b> · saldo <b class="bal" id="sum-week-bal">—</b></span>
+        </article>
+        <article class="card stat expense">
+          <span class="label">Questo mese</span>
+          <span class="value" id="sum-month">—</span>
+          <span class="sub">entrate <b id="sum-month-in">—</b> · saldo <b class="bal" id="sum-month-bal">—</b></span>
+        </article>
       </div>
-      <div class="field">
-        <label for="date">Data</label>
-        <input type="date" id="date" name="date" required>
-      </div>
-      <div class="field">
-        <label for="amount">Importo (€)</label>
-        <input type="number" id="amount" name="amount" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>
-      </div>
-      <div class="field field--grow">
-        <label for="description">Descrizione</label>
-        <input type="text" id="description" name="description" maxlength="500" placeholder="Es. Spesa supermercato / Stipendio">
-      </div>
-      <div class="field field--grow" id="cat-field-personal">
-        <label for="category">Categoria</label>
-        <input type="text" id="category" name="category" list="cat-list" maxlength="60" autocomplete="off" placeholder="Es. Alimentari, Trasporti…">
-        <button type="button" class="suggest" id="cat-suggest" hidden></button>
-      </div>
-      <div class="field field--grow" id="cat-field-home" hidden>
-        <label for="category-home">Categoria</label>
-        <select id="category-home" name="category-home" class="select select--form">
-          <option value="UTENZE">UTENZE</option>
-          <option value="CONDOMINIO">CONDOMINIO</option>
-          <option value="VARIE">VARIE</option>
-        </select>
-      </div>
-      <div class="field" id="conto-field-home" hidden>
-        <label for="account-home">Conto</label>
-        <select id="account-home" name="account-home" class="select select--form">
-          <option value="CONTO ANNA">CONTO ANNA</option>
-          <option value="CONTO MASSY">CONTO MASSY</option>
-        </select>
-      </div>
-      <button type="submit" class="btn">Aggiungi</button>
-    </form>
-    <p class="error" id="error" hidden></p>
-    <p class="model-note" id="model-note" hidden></p>
 
-    <datalist id="cat-list"></datalist>
+      <section class="card card-pad split" id="split-panel" hidden aria-label="Personali e Casa a confronto">
+        <h3>Personali e Casa a confronto</h3>
+        <div class="split__grid">
+          <div class="split__cell">
+            <span class="split__label">Personali · mese</span>
+            <span class="split__val" id="split-personal-month">—</span>
+            <span class="split__sub">complessivo <b id="split-personal-total">—</b></span>
+          </div>
+          <div class="split__cell">
+            <span class="split__label">Casa · mese</span>
+            <span class="split__val" id="split-home-month">—</span>
+            <span class="split__sub">complessivo <b id="split-home-total">—</b></span>
+          </div>
+          <div class="split__cell split__cell--sum">
+            <span class="split__label">Totale · mese</span>
+            <span class="split__val" id="split-all-month">—</span>
+            <span class="split__sub">complessivo <b id="split-all-total">—</b></span>
+          </div>
+        </div>
+      </section>
 
-    <section class="charts">
-      <article class="chart-card">
-        <h2>Ultimi 30 giorni</h2>
-        <div class="chart-box"><canvas id="chart-daily"></canvas></div>
-      </article>
-      <article class="chart-card">
-        <h2>Andamento mensile</h2>
-        <div class="chart-box"><canvas id="chart-monthly"></canvas></div>
-      </article>
-      <article class="chart-card">
-        <h2>Categorie del mese</h2>
-        <div class="chart-box"><canvas id="chart-categories"></canvas></div>
-      </article>
-      <article class="chart-card" id="card-accounts" hidden>
-        <h2>Casa · per conto (mese)</h2>
-        <div class="chart-box"><canvas id="chart-accounts"></canvas></div>
-      </article>
-    </section>
+      <form class="card card-pad form" id="form">
+        <div class="seg" role="group" aria-label="Tipo movimento">
+          <input type="radio" name="kind" id="kind-expense" value="expense" checked>
+          <label for="kind-expense">Spesa</label>
+          <input type="radio" name="kind" id="kind-income" value="income">
+          <label for="kind-income">Entrata</label>
+        </div>
+        <div class="field">
+          <label for="date">Data</label>
+          <input type="date" id="date" name="date" required>
+        </div>
+        <div class="field">
+          <label for="amount">Importo (€)</label>
+          <input type="number" id="amount" name="amount" step="0.01" min="0" inputmode="decimal" placeholder="0,00" required>
+        </div>
+        <div class="field field--grow">
+          <label for="description">Descrizione</label>
+          <input type="text" id="description" name="description" maxlength="500" placeholder="Es. Spesa supermercato / Stipendio">
+        </div>
+        <div class="field field--grow" id="cat-field-personal">
+          <label for="category">Categoria</label>
+          <input type="text" id="category" name="category" list="cat-list" maxlength="60" autocomplete="off" placeholder="Es. Alimentari, Trasporti…">
+          <button type="button" class="suggest" id="cat-suggest" hidden></button>
+        </div>
+        <div class="field field--grow" id="cat-field-home" hidden>
+          <label for="category-home">Categoria</label>
+          <select id="category-home" name="category-home" class="select">
+            <option value="UTENZE">UTENZE</option>
+            <option value="CONDOMINIO">CONDOMINIO</option>
+            <option value="VARIE">VARIE</option>
+          </select>
+        </div>
+        <div class="field" id="conto-field-home" hidden>
+          <label for="account-home">Conto</label>
+          <select id="account-home" name="account-home" class="select">
+            <option value="CONTO ANNA">CONTO ANNA</option>
+            <option value="CONTO MASSY">CONTO MASSY</option>
+          </select>
+        </div>
+        <button type="submit" class="btn primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Aggiungi
+        </button>
+      </form>
+      <p class="model-note" id="model-note" hidden></p>
 
-    <section class="list-wrap">
+      <datalist id="cat-list"></datalist>
+
+      <div class="charts">
+        <article class="card card-pad chart-card">
+          <h3>Ultimi 30 giorni</h3>
+          <div class="chart-box"><canvas id="chart-daily"></canvas></div>
+        </article>
+        <article class="card card-pad chart-card">
+          <h3>Andamento mensile</h3>
+          <div class="chart-box"><canvas id="chart-monthly"></canvas></div>
+        </article>
+        <article class="card card-pad chart-card">
+          <h3>Categorie del mese</h3>
+          <div class="chart-box"><canvas id="chart-categories"></canvas></div>
+        </article>
+        <article class="card card-pad chart-card" id="card-accounts" hidden>
+          <h3>Casa · per conto (mese)</h3>
+          <div class="chart-box"><canvas id="chart-accounts"></canvas></div>
+        </article>
+      </div>
+
       <div class="list-head">
-        <h2>Movimenti</h2>
+        <h2 class="section-title">Movimenti</h2>
         <span class="list-total" id="list-total"></span>
       </div>
-      <div class="list-scroll">
-        <table class="list">
-          <thead>
-            <tr>
-              <th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrizione</th>
-              <th class="num">Importo</th><th aria-label="Azioni"></th>
-            </tr>
-          </thead>
-          <tbody id="rows">
-            <tr class="empty"><td colspan="6">Caricamento…</td></tr>
-          </tbody>
-        </table>
+      <div class="card tx-list" id="tx-list">
+        <div class="empty">Caricamento…</div>
       </div>
-    </section>
 
-    <section class="backup">
-      <div class="backup__head">
-        <h2>Backup e ripristino</h2>
-        <span class="backup__status" id="backup-status">—</span>
+      <h2 class="section-title" style="margin:26px 0 12px">Backup e ripristino</h2>
+      <div class="card card-pad backup">
+        <div class="backup__head">
+          <h3>Copie di sicurezza</h3>
+          <span class="backup__status" id="backup-status">—</span>
+        </div>
+        <p class="backup__note">
+          Export automatico ogni <b>lunedì alle 03:00</b> nella cartella
+          <code>docker/webserver/backups/</code> (ultime 12 settimane).
+          Il file <code>expenses-latest.csv</code> è sempre l'ultima copia.
+        </p>
+        <div class="backup__actions">
+          <a class="btn" href="/api/export.csv">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Esporta CSV ora
+          </a>
+          <button type="button" class="btn" id="backup-run">Salva backup su disco</button>
+          <label class="btn file-btn">
+            Importa CSV…
+            <input type="file" id="import-file" accept=".csv,text/csv" hidden>
+          </label>
+          <select id="import-mode" class="select">
+            <option value="merge">Unisci (salta duplicati)</option>
+            <option value="replace">Sostituisci tutto</option>
+          </select>
+        </div>
+        <p class="backup__result" id="backup-result" hidden></p>
+        <ul class="backup__list" id="backup-list"></ul>
       </div>
-      <p class="backup__note">
-        Export automatico ogni <b>lunedì alle 03:00</b> nella cartella
-        <code>docker/webserver/backups/</code> (ultime 12 settimane).
-        Il file <code>expenses-latest.csv</code> è sempre l'ultima copia.
-      </p>
-      <div class="backup__actions">
-        <a class="btn btn--ghost" href="/api/export.csv">Esporta CSV ora</a>
-        <button type="button" class="btn btn--ghost" id="backup-run">Salva backup su disco</button>
-        <label class="btn btn--ghost file-btn">
-          Importa CSV…
-          <input type="file" id="import-file" accept=".csv,text/csv" hidden>
-        </label>
-        <select id="import-mode" class="select">
-          <option value="merge">Unisci (salta duplicati)</option>
-          <option value="replace">Sostituisci tutto</option>
-        </select>
-      </div>
-      <p class="backup__result" id="backup-result" hidden></p>
-      <ul class="backup__list" id="backup-list"></ul>
-    </section>
+    </main>
   </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/app.js"></script>

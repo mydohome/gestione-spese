@@ -31,13 +31,43 @@ const escapeHtml = (str) =>
 const escapeAttr = (str) => String(str).replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 const CAT_COLORS = [
-  '#6c5ce7', '#00b894', '#0984e3', '#e17055', '#fdcb6e', '#e84393',
-  '#00cec9', '#a29bfe', '#fab1a0', '#55efc4', '#74b9ff', '#ff7675',
+  '#5566ff', '#12b886', '#f08c00', '#e8546b', '#7c3aed', '#0ca678',
+  '#e64980', '#4263eb', '#f76707', '#15aabf', '#ae3ec9', '#37b24d',
 ];
+// Colore stabile per la "pastiglia" di un movimento, derivato dal testo
+function swatchColor(str) {
+  const s = String(str || '');
+  if (!s) return 'var(--ink-faint)';
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
+  return CAT_COLORS[Math.abs(hash) % CAT_COLORS.length];
+}
+
+// Icone inline (stroke, 24x24)
+const ic = {
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+};
+
+const PAGE_META = {
+  personal: ['Personali', 'Spese ed entrate personali'],
+  home: ['Casa', 'Spese di casa per categoria e conto'],
+  all: ['Totale', 'Personali e Casa insieme (sola lettura)'],
+};
+
+function toast(msg, kind) {
+  if (!msg) return;
+  const el = $('#toast');
+  el.textContent = msg;
+  el.className = `toast show${kind === 'error' ? ' error' : ''}`;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = 'toast'; }, 3200);
+}
 
 const form = $('#form');
-const errorEl = $('#error');
-const rowsEl = $('#rows');
+const rowsEl = $('#tx-list');
 const catInput = $('#category');
 const catSuggestBtn = $('#cat-suggest');
 const catHomeSelect = $('#category-home');
@@ -80,20 +110,20 @@ document.querySelectorAll('.tab').forEach((btn) => {
     scope = btn.dataset.scope;
     document.querySelectorAll('.tab').forEach((b) => {
       const on = b === btn;
-      b.classList.toggle('is-active', on);
+      b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+    const [title, sub] = PAGE_META[scope] || PAGE_META.personal;
+    $('#page-title').textContent = title;
+    $('#page-sub').textContent = sub;
     editingId = null;
-    showError('');
     applyScopeUI();
     refresh();
   });
 });
 
-function showError(msg) {
-  errorEl.textContent = msg || '';
-  errorEl.hidden = !msg;
-}
+// Errori mostrati come toast
+function showError(msg) { toast(msg, 'error'); }
 
 /* ---------- Riepiloghi ---------- */
 
@@ -213,67 +243,62 @@ $('#date').addEventListener('change', schedulePrediction);
 /* ---------- Elenco movimenti ---------- */
 
 function viewRow(e) {
-  const sign = e.kind === 'income' ? '+' : '−';
-  const label = e.kind === 'income' ? 'Entrata' : 'Spesa';
-  const scopeChip = scope === 'all'
-    ? `<span class="scope-chip ${e.scope}">${e.scope === 'home' ? 'Casa' : 'Pers.'}</span> `
-    : '';
-  const cat = e.category
-    ? `<span class="cat-tag">${escapeHtml(e.category)}</span>`
-    : '<span class="date">—</span>';
-  const acct = e.account
-    ? `<span class="acct-tag">${escapeHtml(e.account)}</span>`
-    : '';
+  const sign = e.kind === 'income' ? '+ ' : '− ';
+  const name = escapeHtml(e.description) || escapeHtml(e.category) || (e.kind === 'income' ? 'Entrata' : 'Spesa');
+  const swKey = e.kind === 'income' ? 'income' : (e.category || e.description || 'x');
+  const swBg = e.kind === 'income' ? 'var(--income)' : swatchColor(swKey);
+  const initial = escapeHtml((e.category || e.description || (e.kind === 'income' ? 'E' : 'S')).charAt(0).toUpperCase());
+
+  const meta = [];
+  meta.push(escapeHtml(e.category) || 'Senza categoria');
+  meta.push(fmtDate(e.spent_on));
+  if (scope === 'all') meta.push(`<span class="pill ${e.scope}">${e.scope === 'home' ? 'Casa' : 'Personale'}</span>`);
+  if (e.account) meta.push(`<span class="pill acct">${escapeHtml(e.account)}</span>`);
+
   return `
-    <tr data-id="${e.id}">
-      <td class="date">${fmtDate(e.spent_on)}</td>
-      <td>${scopeChip}<span class="badge ${e.kind}">${label}</span></td>
-      <td>${cat}${acct}</td>
-      <td>${escapeHtml(e.description) || '<span class="date">—</span>'}</td>
-      <td class="num amount ${e.kind}">${sign} ${euro.format(e.amount)}</td>
-      <td class="num">
-        <div class="actions">
-          <button class="icon-btn edit" title="Modifica" aria-label="Modifica">&#9998;</button>
-          <button class="icon-btn del" title="Elimina" aria-label="Elimina">&#10005;</button>
-        </div>
-      </td>
-    </tr>`;
+    <div class="tx" data-id="${e.id}" data-scope="${e.scope}">
+      <span class="swatch" style="background:${swBg}">${initial}</span>
+      <div class="meta">
+        <div class="name">${name}</div>
+        <div class="cat">${meta.join('<span aria-hidden="true">·</span>')}</div>
+      </div>
+      <span class="amount ${e.kind}">${sign}${euro.format(e.amount)}</span>
+      <span class="row-actions">
+        <button class="icon-btn edit" aria-label="Modifica">${ic.edit}</button>
+        <button class="icon-btn del" aria-label="Elimina">${ic.trash}</button>
+      </span>
+    </div>`;
 }
 
 function editRow(e) {
   const catField = e.scope === 'home'
-    ? `<select class="edit-input" data-f="category">${HOME_CATEGORIES
-        .map((c) => `<option value="${c}"${e.category === c ? ' selected' : ''}>${c}</option>`)
-        .join('')}</select>
-       <select class="edit-input edit-input--stack" data-f="account">${HOME_ACCOUNTS
-        .map((a) => `<option value="${a}"${e.account === a ? ' selected' : ''}>${a}</option>`)
-        .join('')}</select>`
-    : `<input type="text" class="edit-input" data-f="category" list="cat-list" maxlength="60" value="${escapeAttr(e.category)}">`;
+    ? `<label>Categoria<select data-f="category">${HOME_CATEGORIES
+        .map((c) => `<option value="${c}"${e.category === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
+       <label>Conto<select data-f="account">${HOME_ACCOUNTS
+        .map((a) => `<option value="${a}"${e.account === a ? ' selected' : ''}>${a}</option>`).join('')}</select></label>`
+    : `<label>Categoria<input type="text" data-f="category" list="cat-list" maxlength="60" value="${escapeAttr(e.category)}"></label>`;
   return `
-    <tr data-id="${e.id}" data-scope="${e.scope}" class="editing">
-      <td><input type="date" class="edit-input" data-f="date" value="${e.spent_on}"></td>
-      <td>
-        <select class="edit-input" data-f="kind">
+    <div class="tx editing" data-id="${e.id}" data-scope="${e.scope}">
+      <div class="tx-edit-grid">
+        <label>Data<input type="date" data-f="date" value="${e.spent_on}"></label>
+        <label>Tipo<select data-f="kind">
           <option value="expense"${e.kind === 'expense' ? ' selected' : ''}>Spesa</option>
           <option value="income"${e.kind === 'income' ? ' selected' : ''}>Entrata</option>
-        </select>
-      </td>
-      <td>${catField}</td>
-      <td><input type="text" class="edit-input" data-f="description" maxlength="500" value="${escapeAttr(e.description)}"></td>
-      <td class="num"><input type="number" step="0.01" min="0" class="edit-input amount-input" data-f="amount" value="${e.amount}"></td>
-      <td class="num">
-        <div class="actions">
-          <button class="icon-btn save" title="Salva" aria-label="Salva">&#10003;</button>
-          <button class="icon-btn cancel" title="Annulla" aria-label="Annulla">&#10005;</button>
-        </div>
-      </td>
-    </tr>`;
+        </select></label>
+        <label>Importo (€)<input type="number" step="0.01" min="0" data-f="amount" value="${e.amount}"></label>
+        ${catField}
+        <label style="grid-column:1/-1">Descrizione<input type="text" data-f="description" maxlength="500" value="${escapeAttr(e.description)}"></label>
+      </div>
+      <div class="tx-edit-actions">
+        <button class="btn ghost cancel" type="button">Annulla</button>
+        <button class="btn primary save" type="button">Salva</button>
+      </div>
+    </div>`;
 }
 
 function renderList() {
   if (!expenses.length) {
-    rowsEl.innerHTML =
-      '<tr class="empty"><td colspan="6">Nessun movimento registrato. Aggiungine uno qui sopra.</td></tr>';
+    rowsEl.innerHTML = '<div class="empty">Nessun movimento in questo ambito.</div>';
     return;
   }
   rowsEl.innerHTML = expenses
@@ -290,7 +315,7 @@ async function loadExpenses() {
 rowsEl.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('button');
   if (!btn) return;
-  const tr = btn.closest('tr');
+  const tr = btn.closest('.tx');
   const id = Number(tr.dataset.id);
 
   if (btn.classList.contains('edit')) {
@@ -306,7 +331,7 @@ rowsEl.addEventListener('click', async (ev) => {
   if (btn.classList.contains('del')) {
     if (!confirm('Eliminare questo movimento?')) return;
     const res = await jfetch(`/api/expenses/${id}`, { method: 'DELETE' });
-    if (res.ok) refresh();
+    if (res.ok) { toast('Movimento eliminato'); refresh(); }
     else showError('Impossibile eliminare il movimento.');
     return;
   }
@@ -334,7 +359,7 @@ rowsEl.addEventListener('click', async (ev) => {
       showError(data.error || 'Impossibile salvare le modifiche.');
       return;
     }
-    showError('');
+    toast('Movimento aggiornato');
     editingId = null;
     refresh();
   }
@@ -344,7 +369,6 @@ rowsEl.addEventListener('click', async (ev) => {
 
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  showError('');
 
   const payload = {
     date: $('#date').value,
@@ -374,6 +398,7 @@ form.addEventListener('submit', async (ev) => {
   categoryAuto = false;
   hideSuggestion();
   $('#amount').focus();
+  toast('Movimento aggiunto');
   refresh();
 });
 
@@ -392,7 +417,7 @@ function barLineOptions() {
     },
     scales: {
       x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 14 } },
-      y: { beginAtZero: true, grid: { color: cssVar('--border') }, ticks: { callback: (v) => '€' + v } },
+      y: { beginAtZero: true, grid: { color: cssVar('--line') }, ticks: { callback: (v) => '€' + v } },
     },
   };
 }
@@ -408,10 +433,10 @@ async function loadCharts() {
 
   const expenseColor = cssVar('--expense');
   const incomeColor = cssVar('--income');
-  const accentColor = cssVar('--accent');
+  const accentColor = cssVar('--brand');
 
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
-  Chart.defaults.color = cssVar('--muted');
+  Chart.defaults.color = cssVar('--ink-faint');
 
   const dailyLabels = daily.map((d) => {
     const [, m, dd] = d.day.split('-');
@@ -460,7 +485,7 @@ async function loadCharts() {
         data: categories.length ? categories.map((c) => c.expense) : [1],
         backgroundColor: categories.length
           ? categories.map((_, i) => CAT_COLORS[i % CAT_COLORS.length])
-          : [cssVar('--border')],
+          : [cssVar('--line')],
         borderWidth: 0,
       }],
     },
@@ -481,7 +506,7 @@ async function loadCharts() {
   acctChart?.destroy();
   acctChart = null;
   if (wantAccounts) {
-    const acctColors = { 'CONTO ANNA': '#e84393', 'CONTO MASSY': '#0984e3' };
+    const acctColors = { 'CONTO ANNA': '#e64980', 'CONTO MASSY': '#4263eb' };
     acctChart = new Chart($('#chart-accounts'), {
       type: 'doughnut',
       data: {
@@ -490,7 +515,7 @@ async function loadCharts() {
           data: accounts.length ? accounts.map((a) => a.expense) : [1],
           backgroundColor: accounts.length
             ? accounts.map((a, i) => acctColors[a.account] || CAT_COLORS[i % CAT_COLORS.length])
-            : [cssVar('--border')],
+            : [cssVar('--line')],
           borderWidth: 0,
         }],
       },

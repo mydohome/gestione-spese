@@ -2,15 +2,32 @@
 <html lang="it">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1220">
   <title>Accedi · Le mie spese</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main class="login">
-    <form class="login__card" id="login-form">
-      <h1>Le mie spese</h1>
-      <p class="login__sub">Accedi per continuare</p>
+  <main class="auth">
+    <svg class="blob" width="480" height="480" viewBox="0 0 200 200" aria-hidden="true" style="top:-140px;left:-120px">
+      <path fill="#6c8cff" d="M43 -61C55 -52 62 -37 66 -22C70 -6 70 11 63 24C56 37 42 46 27 54C11 62 -6 69 -21 65C-37 61 -50 46 -58 30C-66 13 -68 -6 -62 -22C-56 -38 -42 -50 -27 -59C-12 -68 4 -73 20 -71C35 -69 31 -70 43 -61Z" transform="translate(100 100)"/>
+    </svg>
+    <svg class="blob" width="400" height="400" viewBox="0 0 200 200" aria-hidden="true" style="bottom:-120px;right:-100px">
+      <path fill="#12b886" d="M39 -56C50 -47 57 -33 62 -18C66 -3 68 14 61 27C55 40 41 47 26 55C11 62 -5 69 -20 65C-35 61 -48 45 -55 29C-63 12 -64 -7 -58 -23C-52 -39 -39 -51 -25 -59C-11 -67 5 -70 20 -68C34 -66 28 -65 39 -56Z" transform="translate(100 100)"/>
+    </svg>
+
+    <form class="auth-card" id="login-form">
+      <div class="brand">
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6c8cff"/><stop offset="1" stop-color="#12b886"/></linearGradient></defs>
+          <rect width="40" height="40" rx="11" fill="url(#lg)"/>
+          <path d="M8 26c4 0 4-6 8-6s4 8 8 8 4-12 10-12" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+          <circle cx="28" cy="14" r="3.4" fill="#fff"/>
+        </svg>
+        <span>Le mie spese</span>
+      </div>
+      <p class="tagline">Accedi per continuare</p>
 
       <label for="username">Utente</label>
       <input type="text" id="username" name="username" autocomplete="username" required autofocus>
@@ -18,8 +35,8 @@
       <label for="password">Password</label>
       <input type="password" id="password" name="password" autocomplete="current-password" required>
 
-      <button type="submit" class="btn">Accedi</button>
-      <p class="login__error" id="login-error" hidden></p>
+      <button type="submit" class="btn primary">Accedi</button>
+      <p class="auth-error" id="login-error" hidden></p>
     </form>
   </main>
 
