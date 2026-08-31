@@ -6,17 +6,18 @@ Gira in Docker con un database PostgreSQL dedicato.
 
 ## Funzionalità
 
-- **Tre tab**:
+- **Navigazione a sezioni** — menu laterale su desktop, barra in basso su smartphone:
+  - **Dashboard** — riepiloghi oggi/settimana/mese, andamento 30 giorni e mensile
+  - **Movimenti** — inserimento e elenco movimenti (righe con "pastiglia" colorata, modifica inline)
+  - **Categorie** — torta e riepilogo per categoria (spesa del mese e complessiva); per Casa anche per conto
+  - **Backup** — export/import CSV e copie di sicurezza
+- **Switch ambito** (Personali / Casa / Totale) sempre in alto:
   - **Personali** — categoria a testo libero con autocompletamento e **categoria suggerita**
     da un modello predittivo (Naive Bayes) che si adatta mese dopo mese.
   - **Casa** — categoria a scelta fissa tra **UTENZE**, **CONDOMINIO**, **VARIE** e
     **conto** a scelta tra **CONTO ANNA** e **CONTO MASSY**.
-  - **Totale** — riepilogo di sola lettura con spese personali + casa insieme e
-    confronto Personali / Casa (mese e complessivo).
+  - **Totale** — sola lettura: spese personali + casa insieme, con confronto (mese e complessivo).
 - Spese ed **entrate** (es. stipendio), con saldo.
-- Riepiloghi **oggi / settimana / mese** e totale complessivo, filtrati per tab.
-- Grafici: andamento ultimi 30 giorni, andamento mensile con saldo, torta categorie
-  del mese e, per Casa/Totale, torta delle spese di casa per conto.
 - Record **modificabili inline** ed eliminabili.
 - **Autenticazione** a sessione (cookie firmato), con protezione anti-brute-force.
 - **Backup CSV** automatico settimanale (lunedì 03:00, ultime 12 copie) + **import/ripristino** da CSV.

@@ -19,10 +19,12 @@ async function jfetch(url, opts) {
   return res;
 }
 
-document.getElementById('logout').addEventListener('click', async () => {
+async function doLogout() {
   await jfetch('/api/logout', { method: 'POST' }).catch(() => {});
   location.href = '/login';
-});
+}
+document.getElementById('logout').addEventListener('click', doLogout);
+document.getElementById('logout-m')?.addEventListener('click', doLogout);
 
 const escapeHtml = (str) =>
   String(str).replace(/[&<>"']/g, (c) => ({
@@ -51,12 +53,6 @@ const ic = {
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
 };
 
-const PAGE_META = {
-  personal: ['Personali', 'Spese ed entrate personali'],
-  home: ['Casa', 'Spese di casa per categoria e conto'],
-  all: ['Totale', 'Personali e Casa insieme (sola lettura)'],
-};
-
 function toast(msg, kind) {
   if (!msg) return;
   const el = $('#toast');
@@ -81,12 +77,68 @@ let editingId = null;
 let dailyChart, monthlyChart, catChart, acctChart;
 let predictTimer = null;
 let categoryAuto = false; // true se la categoria e' stata compilata dal modello e non ancora toccata
-let scope = 'personal';   // ambito attivo: 'personal' | 'home' | 'all'
 
-// Aggiunge ?scope= alle chiamate che dipendono dal tab attivo
+const VIEWS = ['dashboard', 'movimenti', 'categorie', 'backup'];
+const VIEW_TITLE = {
+  dashboard: 'Dashboard', movimenti: 'Movimenti', categorie: 'Categorie', backup: 'Backup',
+};
+const SCOPE_LABEL = { personal: 'personali', home: 'di casa', all: 'personali e di casa' };
+
+const readHash = () => (location.hash.replace(/^#\/?/, '') || 'dashboard');
+let view = VIEWS.includes(readHash()) ? readHash() : 'dashboard';
+
+let scope = localStorage.getItem('scope') || 'personal';
+if (!['personal', 'home', 'all'].includes(scope)) scope = 'personal';
+
+// Aggiunge ?scope= alle chiamate che dipendono dallo switch attivo
 const withScope = (url) => url + (url.includes('?') ? '&' : '?') + 'scope=' + scope;
 
-/* ---------- Tab Personali / Casa ---------- */
+// Errori mostrati come toast
+function showError(msg) { toast(msg, 'error'); }
+
+/* ---------- Navigazione fra viste ---------- */
+
+const VIEW_LOADERS = {
+  dashboard: loadDashboard,
+  movimenti: loadMovimenti,
+  categorie: loadCategorieView,
+  backup: loadBackupView,
+};
+
+function setView(next, { push = true } = {}) {
+  if (!VIEWS.includes(next)) next = 'dashboard';
+  view = next;
+  if (push && readHash() !== next) location.hash = `#/${next}`;
+
+  document.querySelectorAll('section[data-view]').forEach((s) => {
+    s.hidden = s.dataset.view !== view;
+  });
+  document.querySelectorAll('.nav-link[data-view], .tabbar button[data-view]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === view);
+  });
+
+  // Lo switch ambito non ha senso nella sezione Backup (dati globali)
+  $('#scope-switch').hidden = view === 'backup';
+  $('#page-title').textContent = VIEW_TITLE[view];
+  $('#page-sub').textContent = view === 'backup'
+    ? 'Copie CSV e ripristino'
+    : `Spese ed entrate ${SCOPE_LABEL[scope]}`;
+
+  editingId = null;
+  reloadView();
+}
+
+function reloadView() {
+  const fn = VIEW_LOADERS[view] || loadDashboard;
+  Promise.resolve(fn()).catch((e) => showError(e.message || 'Errore di caricamento'));
+}
+
+document.querySelectorAll('.nav-link[data-view], .tabbar button[data-view]').forEach((b) => {
+  b.addEventListener('click', () => setView(b.dataset.view));
+});
+window.addEventListener('hashchange', () => setView(readHash(), { push: false }));
+
+/* ---------- Switch ambito: Personali / Casa / Totale ---------- */
 
 function applyScopeUI() {
   const home = scope === 'home';
@@ -104,26 +156,22 @@ function applyScopeUI() {
   }
 }
 
-document.querySelectorAll('.tab').forEach((btn) => {
+document.querySelectorAll('#scope-switch .tab').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (btn.dataset.scope === scope) return;
     scope = btn.dataset.scope;
-    document.querySelectorAll('.tab').forEach((b) => {
-      const on = b === btn;
+    localStorage.setItem('scope', scope);
+    document.querySelectorAll('#scope-switch .tab').forEach((b) => {
+      const on = b.dataset.scope === scope;
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    const [title, sub] = PAGE_META[scope] || PAGE_META.personal;
-    $('#page-title').textContent = title;
-    $('#page-sub').textContent = sub;
+    $('#page-sub').textContent = `Spese ed entrate ${SCOPE_LABEL[scope]}`;
     editingId = null;
     applyScopeUI();
-    refresh();
+    reloadView();
   });
 });
-
-// Errori mostrati come toast
-function showError(msg) { toast(msg, 'error'); }
 
 /* ---------- Riepiloghi ---------- */
 
@@ -331,7 +379,7 @@ rowsEl.addEventListener('click', async (ev) => {
   if (btn.classList.contains('del')) {
     if (!confirm('Eliminare questo movimento?')) return;
     const res = await jfetch(`/api/expenses/${id}`, { method: 'DELETE' });
-    if (res.ok) { toast('Movimento eliminato'); refresh(); }
+    if (res.ok) { toast("Movimento eliminato"); reloadView(); }
     else showError('Impossibile eliminare il movimento.');
     return;
   }
@@ -361,7 +409,7 @@ rowsEl.addEventListener('click', async (ev) => {
     }
     toast('Movimento aggiornato');
     editingId = null;
-    refresh();
+    reloadView();
   }
 });
 
@@ -399,7 +447,7 @@ form.addEventListener('submit', async (ev) => {
   hideSuggestion();
   $('#amount').focus();
   toast('Movimento aggiunto');
-  refresh();
+  reloadView();
 });
 
 /* ---------- Grafici ---------- */
@@ -422,21 +470,34 @@ function barLineOptions() {
   };
 }
 
-async function loadCharts() {
-  const wantAccounts = scope === 'home' || scope === 'all';
-  const [daily, monthly, categories, accounts] = await Promise.all([
+function chartDefaults() {
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.color = cssVar('--ink-faint');
+}
+
+const doughnutOptions = (hasData) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  cutout: '58%',
+  plugins: {
+    legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true } },
+    tooltip: {
+      enabled: hasData,
+      callbacks: { label: (ctx) => `${ctx.label}: ${euro.format(ctx.parsed)}` },
+    },
+  },
+});
+
+async function loadDashboardCharts() {
+  chartDefaults();
+  const [daily, monthly] = await Promise.all([
     jfetch(withScope('/api/chart/daily?days=30')).then((r) => r.json()),
     jfetch(withScope('/api/chart/monthly?months=12')).then((r) => r.json()),
-    jfetch(withScope('/api/chart/categories')).then((r) => r.json()),
-    wantAccounts ? jfetch('/api/chart/accounts').then((r) => r.json()) : Promise.resolve([]),
   ]);
 
   const expenseColor = cssVar('--expense');
   const incomeColor = cssVar('--income');
   const accentColor = cssVar('--brand');
-
-  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
-  Chart.defaults.color = cssVar('--ink-faint');
 
   const dailyLabels = daily.map((d) => {
     const [, m, dd] = d.day.split('-');
@@ -475,36 +536,29 @@ async function loadCharts() {
     },
     options: barLineOptions(),
   });
+}
 
+async function loadCategoryCharts(categories, accounts) {
+  chartDefaults();
   catChart?.destroy();
   catChart = new Chart($('#chart-categories'), {
     type: 'doughnut',
     data: {
       labels: categories.length ? categories.map((c) => c.category) : ['Nessuna spesa questo mese'],
       datasets: [{
-        data: categories.length ? categories.map((c) => c.expense) : [1],
+        data: categories.length ? categories.map((c) => c.month_expense || c.expense || 0) : [1],
         backgroundColor: categories.length
-          ? categories.map((_, i) => CAT_COLORS[i % CAT_COLORS.length])
+          ? categories.map((c) => swatchColor(c.category))
           : [cssVar('--line')],
         borderWidth: 0,
       }],
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '58%',
-      plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-        tooltip: {
-          enabled: categories.length > 0,
-          callbacks: { label: (ctx) => `${ctx.label}: ${euro.format(ctx.parsed)}` },
-        },
-      },
-    },
+    options: doughnutOptions(categories.length > 0),
   });
 
   acctChart?.destroy();
   acctChart = null;
+  const wantAccounts = scope === 'home' || scope === 'all';
   if (wantAccounts) {
     const acctColors = { 'CONTO ANNA': '#e64980', 'CONTO MASSY': '#4263eb' };
     acctChart = new Chart($('#chart-accounts'), {
@@ -519,18 +573,7 @@ async function loadCharts() {
           borderWidth: 0,
         }],
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '58%',
-        plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-          tooltip: {
-            enabled: accounts.length > 0,
-            callbacks: { label: (ctx) => `${ctx.label}: ${euro.format(ctx.parsed)}` },
-          },
-        },
-      },
+      options: doughnutOptions(accounts.length > 0),
     });
   }
 }
@@ -610,22 +653,65 @@ $('#import-file').addEventListener('change', async (ev) => {
       (data.skipped ? ` · ${data.skipped} duplicati saltati` : '') +
       bad + '.'
   );
-  refresh();
+  toast('Import completato');
 });
+
+/* ---------- Caricamento per vista ---------- */
+
+async function loadDashboard() {
+  await Promise.all([loadSummary(), loadDashboardCharts()]);
+}
+
+async function loadMovimenti() {
+  await Promise.all([loadSummary(), loadExpenses(), loadCategories(), loadModelNote()]);
+}
+
+async function loadCategorieView() {
+  const wantAccounts = scope === 'home' || scope === 'all';
+  const [cats, accounts] = await Promise.all([
+    jfetch(withScope('/api/categories/summary')).then((r) => r.json()),
+    wantAccounts ? jfetch('/api/chart/accounts').then((r) => r.json()) : Promise.resolve([]),
+  ]);
+
+  const box = $('#cat-rows');
+  const expenseCats = cats.filter((c) => c.total_expense > 0 || c.month_expense > 0);
+  if (!expenseCats.length) {
+    box.innerHTML = '<div class="empty">Nessuna spesa categorizzata in questo ambito.</div>';
+  } else {
+    box.innerHTML = expenseCats.map((c) => `
+      <div class="cat-row">
+        <span class="dot" style="background:${swatchColor(c.category)}"></span>
+        <div>
+          <div class="c-name">${escapeHtml(c.category)}</div>
+          <div class="c-count">${c.count} moviment${c.count === 1 ? 'o' : 'i'}</div>
+        </div>
+        <div class="c-amt">
+          <b>${euro.format(c.month_expense)}</b>
+          <span>mese · ${euro.format(c.total_expense)} totale</span>
+        </div>
+      </div>`).join('');
+  }
+
+  // per le doughnut riuso il formato con month_expense
+  await loadCategoryCharts(
+    expenseCats.map((c) => ({ category: c.category, month_expense: c.month_expense })),
+    accounts,
+  );
+}
+
+async function loadBackupView() {
+  await loadBackups();
+}
 
 /* ---------- Bootstrap ---------- */
 
-async function refresh() {
-  await Promise.all([
-    loadSummary(),
-    loadExpenses(),
-    loadCharts(),
-    loadCategories(),
-    loadModelNote(),
-    loadBackups(),
-  ]);
-}
-
 $('#date').value = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD locale
+
+// stato iniziale dello switch ambito
+document.querySelectorAll('#scope-switch .tab').forEach((b) => {
+  const on = b.dataset.scope === scope;
+  b.classList.toggle('active', on);
+  b.setAttribute('aria-selected', on ? 'true' : 'false');
+});
 applyScopeUI();
-refresh();
+setView(view, { push: false });

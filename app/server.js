@@ -404,6 +404,25 @@ app.get('/api/chart/categories', async (req, res, next) => {
   }
 });
 
+// Riepilogo per categoria (vista Categorie): conteggio, spesa del mese e complessiva
+app.get('/api/categories/summary', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT COALESCE(NULLIF(category, ''), 'Senza categoria') AS category,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(amount) FILTER (WHERE kind = 'expense'), 0)::float8 AS total_expense,
+             COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)::float8 AS total_income,
+             COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense
+      FROM expenses
+      WHERE ($1 = 'all' OR scope = $1)
+      GROUP BY 1 ORDER BY total_expense DESC, category
+    `, [scopeParam(req)]);
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Spese di casa per conto, nel mese corrente
 app.get('/api/chart/accounts', async (req, res, next) => {
   try {
