@@ -27,6 +27,12 @@ const scopeParam = (req) => {
   return s === 'home' || s === 'all' ? s : 'personal';
 };
 
+// Mese selezionato in un riepilogo, come 'YYYY-MM'; null = mese corrente
+const monthParam = (req) => {
+  const m = String(req.query.month || '');
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(m) ? m : null;
+};
+
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.set('trust proxy', 1); // dietro il reverse proxy (NPM)
@@ -114,6 +120,23 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS expenses_scope_idx ON expenses (scope);
     CREATE INDEX IF NOT EXISTS expenses_account_idx ON expenses (account);
 
+    -- Spese fisse ricorrenti (mutuo, finanziamenti, addebiti, stipendio...)
+    CREATE TABLE IF NOT EXISTS recurring (
+      id           SERIAL PRIMARY KEY,
+      description  TEXT NOT NULL DEFAULT '',
+      amount       NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+      kind         TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income')),
+      category     TEXT NOT NULL DEFAULT '',
+      scope        TEXT NOT NULL DEFAULT 'personal' CHECK (scope IN ('personal', 'home')),
+      account      TEXT NOT NULL DEFAULT '',
+      day_of_month INT NOT NULL DEFAULT 1 CHECK (day_of_month BETWEEN 1 AND 31),
+      active       BOOLEAN NOT NULL DEFAULT true,
+      last_run_ym  TEXT NOT NULL DEFAULT '',
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS recurring_id INT REFERENCES recurring(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS expenses_recurring_idx ON expenses (recurring_id);
+
     -- Anagrafica categorie (gestita dall'utente), per ambito
     CREATE TABLE IF NOT EXISTS categories (
       id         SERIAL PRIMARY KEY,
@@ -130,6 +153,21 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE UNIQUE INDEX IF NOT EXISTS accounts_name_uidx ON accounts (lower(name));
+
+    -- Previsione spese annuali: voci di budget per anno
+    CREATE TABLE IF NOT EXISTS forecast (
+      id         SERIAL PRIMARY KEY,
+      year       INT  NOT NULL,
+      label      TEXT NOT NULL DEFAULT '',
+      category   TEXT NOT NULL DEFAULT '',
+      kind       TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income')),
+      amount     NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+      frequency  TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('monthly', 'annual')),
+      month      INT CHECK (month BETWEEN 1 AND 12),
+      note       TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS forecast_year_idx ON forecast (year);
   `);
 
   // Seed iniziale (idempotente)
@@ -187,7 +225,8 @@ const SELECT_ROW = `
   kind,
   category,
   scope,
-  account
+  account,
+  recurring_id
 `;
 
 /* ---------------- Modello predittivo ---------------- */
@@ -392,6 +431,10 @@ app.put('/api/categories/:id', async (req, res, next) => {
       'UPDATE expenses SET category = $1 WHERE scope = $2 AND lower(category) = lower($3)',
       [norm, scope, oldName]
     );
+    await client.query(
+      'UPDATE recurring SET category = $1 WHERE scope = $2 AND lower(category) = lower($3)',
+      [norm, scope, oldName]
+    );
     await client.query('COMMIT');
     modelDirty = true;
     res.json({ id, name: norm, scope });
@@ -415,6 +458,10 @@ app.delete('/api/categories/:id', async (req, res, next) => {
     // I movimenti restano, senza categoria
     const upd = await client.query(
       "UPDATE expenses SET category = '' WHERE scope = $1 AND lower(category) = lower($2)",
+      [scope, name]
+    );
+    await client.query(
+      "UPDATE recurring SET category = '' WHERE scope = $1 AND lower(category) = lower($2)",
       [scope, name]
     );
     await client.query('DELETE FROM categories WHERE id = $1', [id]);
@@ -478,6 +525,7 @@ app.put('/api/accounts/:id', async (req, res, next) => {
     if (dup.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Esiste già un conto con questo nome.' }); }
     await client.query('UPDATE accounts SET name = $1 WHERE id = $2', [name, id]);
     await client.query('UPDATE expenses SET account = $1 WHERE lower(account) = lower($2)', [name, cur.rows[0].name]);
+    await client.query('UPDATE recurring SET account = $1 WHERE lower(account) = lower($2)', [name, cur.rows[0].name]);
     await client.query('COMMIT');
     res.json({ id, name });
   } catch (err) {
@@ -497,6 +545,7 @@ app.delete('/api/accounts/:id', async (req, res, next) => {
     const cur = await client.query('SELECT name FROM accounts WHERE id = $1', [id]);
     if (!cur.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Conto non trovato' }); }
     const upd = await client.query("UPDATE expenses SET account = '' WHERE lower(account) = lower($1)", [cur.rows[0].name]);
+    await client.query("UPDATE recurring SET account = '' WHERE lower(account) = lower($1)", [cur.rows[0].name]);
     await client.query('DELETE FROM accounts WHERE id = $1', [id]);
     await client.query('COMMIT');
     res.json({ ok: true, cleared: upd.rowCount });
@@ -505,6 +554,305 @@ app.delete('/api/accounts/:id', async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+/* ---------------- Spese fisse ricorrenti ---------------- */
+
+const daysInMonth = (ym) => {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+};
+const currentYm = () => new Date().toLocaleDateString('sv-SE').slice(0, 7);
+
+const REC_ROW =
+  'id, description, amount::float8 AS amount, kind, category, scope, account, day_of_month, active, last_run_ym';
+
+function parseRecurringBody(body) {
+  const { description, amount, kind, category, scope, account, day_of_month, active } = body || {};
+  const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt < 0) {
+    return { error: 'Importo non valido: dev\'essere un numero >= 0.' };
+  }
+  let dom = Math.trunc(Number(day_of_month));
+  if (!Number.isFinite(dom) || dom < 1) dom = 1;
+  if (dom > 31) dom = 31;
+  const sc = catScope(scope);
+  let cat = String(category || '').trim().slice(0, 60);
+  if (sc === 'home') cat = cat.toUpperCase();
+  const acc = String(account || '').trim().slice(0, 60);
+  if (sc === 'home' && !cat) return { error: 'Per le spese di casa scegli una categoria.' };
+  return {
+    value: {
+      description: String(description || '').trim().slice(0, 500),
+      amount: amt.toFixed(2),
+      kind: kind === 'income' ? 'income' : 'expense',
+      category: cat,
+      scope: sc,
+      account: acc,
+      day_of_month: dom,
+      active: active === undefined ? true : !!active,
+    },
+  };
+}
+
+// Crea i movimenti del mese corrente per le regole attive non ancora eseguite questo mese.
+// Nessuno storico retroattivo: si genera solo per il mese in corso.
+async function generateRecurring() {
+  const ym = currentYm();
+  const dateFor = (dom) =>
+    `${ym}-${String(Math.min(dom, daysInMonth(ym))).padStart(2, '0')}`;
+  const { rows } = await pool.query(
+    `SELECT id, description, amount::text AS amount, kind, category, scope, account, day_of_month
+     FROM recurring WHERE active AND last_run_ym < $1`,
+    [ym]
+  );
+  let created = 0;
+  for (const r of rows) {
+    const dup = await pool.query(
+      `SELECT 1 FROM expenses WHERE recurring_id = $1 AND to_char(spent_on, 'YYYY-MM') = $2 LIMIT 1`,
+      [r.id, ym]
+    );
+    if (!dup.rowCount) {
+      await pool.query(
+        `INSERT INTO expenses (spent_on, amount, description, kind, category, scope, account, recurring_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [dateFor(r.day_of_month), r.amount, r.description, r.kind, r.category, r.scope, r.account, r.id]
+      );
+      created++;
+    }
+    await pool.query('UPDATE recurring SET last_run_ym = $1 WHERE id = $2', [ym, r.id]);
+  }
+  if (created) modelDirty = true;
+  return created;
+}
+
+async function runGeneration(tag) {
+  try {
+    const n = await generateRecurring();
+    if (n) console.log(`Spese fisse${tag ? ` (${tag})` : ''}: ${n} movimenti generati per ${currentYm()}`);
+  } catch (err) {
+    console.error('Generazione spese fisse fallita:', err.message);
+  }
+}
+
+app.get('/api/recurring', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${REC_ROW} FROM recurring ORDER BY active DESC, lower(description), id`
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/recurring', async (req, res, next) => {
+  try {
+    const parsed = parseRecurringBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const refErr = await checkRefs(parsed.value);
+    if (refErr) return res.status(400).json({ error: refErr });
+    const v = parsed.value;
+    const { rows } = await pool.query(
+      `INSERT INTO recurring (description, amount, kind, category, scope, account, day_of_month, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING ${REC_ROW}`,
+      [v.description, v.amount, v.kind, v.category, v.scope, v.account, v.day_of_month, v.active]
+    );
+    await runGeneration('nuova');
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put('/api/recurring/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    const parsed = parseRecurringBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const refErr = await checkRefs(parsed.value);
+    if (refErr) return res.status(400).json({ error: refErr });
+    const v = parsed.value;
+    const { rows } = await pool.query(
+      `UPDATE recurring
+       SET description = $1, amount = $2, kind = $3, category = $4, scope = $5, account = $6, day_of_month = $7, active = $8
+       WHERE id = $9
+       RETURNING ${REC_ROW}`,
+      [v.description, v.amount, v.kind, v.category, v.scope, v.account, v.day_of_month, v.active, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Spesa fissa non trovata' });
+    if (rows[0].active) await runGeneration();
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Attiva / disattiva una spesa fissa
+app.post('/api/recurring/:id/toggle', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    const { rows } = await pool.query(
+      `UPDATE recurring SET active = NOT active WHERE id = $1 RETURNING ${REC_ROW}`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Spesa fissa non trovata' });
+    if (rows[0].active) await runGeneration('riattivata');
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Elimina la regola. I movimenti già generati restano (recurring_id -> NULL).
+app.delete('/api/recurring/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    const r = await pool.query('DELETE FROM recurring WHERE id = $1', [id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Spesa fissa non trovata' });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ---------------- Previsione spese annuali ---------------- */
+
+const FC_ROW =
+  'id, year, label, category, kind, amount::float8 AS amount, frequency, month, note';
+
+function parseForecastBody(body) {
+  const { year, label, category, kind, amount, frequency, month, note } = body || {};
+  const y = Math.trunc(Number(year));
+  if (!Number.isFinite(y) || y < 2000 || y > 2100) return { error: 'Anno non valido.' };
+  const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt < 0) {
+    return { error: 'Importo non valido: dev\'essere un numero >= 0.' };
+  }
+  const freq = frequency === 'annual' ? 'annual' : 'monthly';
+  let m = null;
+  if (freq === 'annual') {
+    m = Math.trunc(Number(month));
+    if (!Number.isFinite(m) || m < 1 || m > 12) m = 1;
+  }
+  return {
+    value: {
+      year: y,
+      label: String(label || '').trim().slice(0, 120),
+      category: String(category || '').trim().slice(0, 60),
+      kind: kind === 'income' ? 'income' : 'expense',
+      amount: amt.toFixed(2),
+      frequency: freq,
+      month: m,
+      note: String(note || '').trim().slice(0, 300),
+    },
+  };
+}
+
+app.get('/api/forecast', async (req, res, next) => {
+  try {
+    const y = Math.trunc(Number(req.query.year)) || new Date().getFullYear();
+
+    const items = (await pool.query(
+      `SELECT ${FC_ROW} FROM forecast
+       WHERE year = $1 ORDER BY kind DESC, lower(category), lower(label), id`,
+      [y]
+    )).rows;
+
+    // Consuntivo reale dell'anno, ripartito per mese
+    const actual = (await pool.query(`
+      SELECT EXTRACT(MONTH FROM spent_on)::int AS month,
+             COALESCE(SUM(amount) FILTER (WHERE kind = 'expense'), 0)::float8 AS expense,
+             COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)::float8  AS income
+      FROM expenses
+      WHERE EXTRACT(YEAR FROM spent_on)::int = $1
+      GROUP BY 1 ORDER BY 1
+    `, [y])).rows;
+
+    // Anni che hanno una previsione o dei movimenti (per il selettore)
+    const years = (await pool.query(`
+      SELECT DISTINCT y FROM (
+        SELECT year AS y FROM forecast
+        UNION SELECT EXTRACT(YEAR FROM spent_on)::int FROM expenses
+      ) t WHERE y IS NOT NULL ORDER BY y DESC
+    `)).rows.map((r) => r.y);
+
+    res.json({ year: y, items, actual, years });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/forecast', async (req, res, next) => {
+  try {
+    const parsed = parseForecastBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const v = parsed.value;
+    const { rows } = await pool.query(
+      `INSERT INTO forecast (year, label, category, kind, amount, frequency, month, note)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${FC_ROW}`,
+      [v.year, v.label, v.category, v.kind, v.amount, v.frequency, v.month, v.note]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put('/api/forecast/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    const parsed = parseForecastBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const v = parsed.value;
+    const { rows } = await pool.query(
+      `UPDATE forecast
+       SET year = $1, label = $2, category = $3, kind = $4, amount = $5, frequency = $6, month = $7, note = $8
+       WHERE id = $9 RETURNING ${FC_ROW}`,
+      [v.year, v.label, v.category, v.kind, v.amount, v.frequency, v.month, v.note, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Voce non trovata' });
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete('/api/forecast/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID non valido' });
+    const r = await pool.query('DELETE FROM forecast WHERE id = $1', [id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Voce non trovata' });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Copia tutte le voci di previsione da un anno all'altro
+app.post('/api/forecast/copy', async (req, res, next) => {
+  try {
+    const from = Math.trunc(Number(req.body?.from));
+    const to = Math.trunc(Number(req.body?.to));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) {
+      return res.status(400).json({ error: 'Anni non validi.' });
+    }
+    const { rowCount } = await pool.query(
+      `INSERT INTO forecast (year, label, category, kind, amount, frequency, month, note)
+       SELECT $2, label, category, kind, amount, frequency, month, note
+       FROM forecast WHERE year = $1`,
+      [from, to]
+    );
+    res.json({ ok: true, copied: rowCount });
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -543,32 +891,40 @@ app.get('/api/model', async (req, res, next) => {
 
 app.get('/api/summary', async (req, res, next) => {
   try {
+    const month = monthParam(req);
     const { rows } = await pool.query(`
+      WITH b AS (
+        SELECT COALESCE(to_date($2::text, 'YYYY-MM'), date_trunc('month', CURRENT_DATE)::date) AS ms
+      )
       SELECT
         COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on = CURRENT_DATE), 0)::float8                       AS day_expense,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on = CURRENT_DATE), 0)::float8                       AS day_income,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('week',  CURRENT_DATE)), 0)::float8 AS week_expense,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= date_trunc('week',  CURRENT_DATE)), 0)::float8 AS week_income,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_income,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('week', CURRENT_DATE) AND spent_on < date_trunc('week', CURRENT_DATE) + interval '1 week'), 0)::float8 AS week_expense,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= date_trunc('week', CURRENT_DATE) AND spent_on < date_trunc('week', CURRENT_DATE) + interval '1 week'), 0)::float8 AS week_income,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= (SELECT ms FROM b) AND spent_on < (SELECT ms FROM b) + interval '1 month'), 0)::float8 AS month_expense,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= (SELECT ms FROM b) AND spent_on < (SELECT ms FROM b) + interval '1 month'), 0)::float8 AS month_income,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'expense'), 0)::float8                                                   AS total_expense,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)::float8                                                    AS total_income,
-        COUNT(*)::int                                                                                                     AS count
+        COUNT(*)::int                                                                                                     AS count,
+        to_char(MIN(spent_on), 'YYYY-MM-DD')                                                                              AS first_date
       FROM expenses
       WHERE ($1 = 'all' OR scope = $1)
-    `, [scopeParam(req)]);
+    `, [scopeParam(req), month]);
     const r = rows[0];
     const period = (e, i) => ({ expense: e, income: i, balance: +(i - e).toFixed(2) });
 
-    // Ripartizione Personali / Casa (mese corrente e complessivo), per il tab Totale
+    // Ripartizione Personali / Casa (mese selezionato e complessivo), per il tab Totale
     const { rows: split } = await pool.query(`
+      WITH b AS (
+        SELECT COALESCE(to_date($1::text, 'YYYY-MM'), date_trunc('month', CURRENT_DATE)::date) AS ms
+      )
       SELECT scope,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_expense,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= date_trunc('month', CURRENT_DATE)), 0)::float8 AS month_income,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'expense' AND spent_on >= (SELECT ms FROM b) AND spent_on < (SELECT ms FROM b) + interval '1 month'), 0)::float8 AS month_expense,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'income'  AND spent_on >= (SELECT ms FROM b) AND spent_on < (SELECT ms FROM b) + interval '1 month'), 0)::float8 AS month_income,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'expense'), 0)::float8 AS total_expense,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'income'), 0)::float8  AS total_income
       FROM expenses GROUP BY scope
-    `);
+    `, [month]);
     const byScope = { personal: null, home: null };
     for (const s of split) {
       byScope[s.scope] = {
@@ -586,6 +942,8 @@ app.get('/api/summary', async (req, res, next) => {
       month: period(r.month_expense, r.month_income),
       total: period(r.total_expense, r.total_income),
       count: r.count,
+      firstDate: r.first_date,
+      selectedMonth: month,
       byScope,
     });
   } catch (err) {
@@ -595,6 +953,22 @@ app.get('/api/summary', async (req, res, next) => {
 
 app.get('/api/chart/daily', async (req, res, next) => {
   try {
+    const month = monthParam(req);
+    if (month) {
+      // Un punto per ogni giorno del mese selezionato
+      const { rows } = await pool.query(`
+        SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
+               COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'expense'), 0)::float8 AS expense,
+               COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'income'), 0)::float8  AS income
+        FROM generate_series(
+               to_date($1::text, 'YYYY-MM'),
+               (to_date($1::text, 'YYYY-MM') + interval '1 month' - interval '1 day')::date,
+               interval '1 day') d
+        LEFT JOIN expenses e ON e.spent_on = d::date AND ($2 = 'all' OR e.scope = $2)
+        GROUP BY d ORDER BY d
+      `, [month, scopeParam(req)]);
+      return res.json(rows);
+    }
     const days = Math.min(90, Math.max(7, Number(req.query.days) || 30));
     const { rows } = await pool.query(`
       SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
@@ -613,16 +987,20 @@ app.get('/api/chart/daily', async (req, res, next) => {
 app.get('/api/chart/monthly', async (req, res, next) => {
   try {
     const months = Math.min(24, Math.max(3, Number(req.query.months) || 12));
+    const month = monthParam(req);
     const { rows } = await pool.query(`
+      WITH b AS (
+        SELECT COALESCE(to_date($2::text, 'YYYY-MM'), date_trunc('month', CURRENT_DATE)::date) AS anchor
+      )
       SELECT to_char(m, 'YYYY-MM') AS month,
              COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'expense'), 0)::float8 AS expense,
              COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'income'), 0)::float8  AS income
-      FROM generate_series(date_trunc('month', CURRENT_DATE) - make_interval(months => $1::int - 1),
-                           date_trunc('month', CURRENT_DATE),
+      FROM generate_series((SELECT anchor FROM b) - make_interval(months => $1::int - 1),
+                           (SELECT anchor FROM b),
                            interval '1 month') m
-      LEFT JOIN expenses e ON date_trunc('month', e.spent_on) = m AND ($2 = 'all' OR e.scope = $2)
+      LEFT JOIN expenses e ON date_trunc('month', e.spent_on) = m AND ($3 = 'all' OR e.scope = $3)
       GROUP BY m ORDER BY m
-    `, [months, scopeParam(req)]);
+    `, [months, month, scopeParam(req)]);
     res.json(rows);
   } catch (err) {
     next(err);
@@ -810,6 +1188,10 @@ async function start() {
   } catch (err) {
     console.error('Addestramento iniziale del modello fallito:', err.message);
   }
+
+  // Spese fisse: genera i movimenti del mese corrente all'avvio e ogni giorno alle 00:05
+  await runGeneration('avvio');
+  cron.schedule('5 0 * * *', () => runGeneration('cron'), { timezone: 'Europe/Rome' });
 
   // Backup automatico: ogni lunedì alle 03:00 (Europe/Rome)
   cron.schedule('0 3 * * 1', async () => {

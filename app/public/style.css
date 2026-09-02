@@ -14,10 +14,12 @@
   --expense: #e8546b;
   --income: #12b886;
   --warn: #f08c00;
-  --radius: 16px;
-  --radius-sm: 10px;
-  --shadow: 0 1px 2px rgba(20, 24, 40, .04), 0 12px 32px rgba(20, 24, 40, .08);
-  --shadow-sm: 0 1px 3px rgba(20, 24, 40, .08);
+  --radius: 20px;
+  --radius-sm: 13px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(20, 24, 40, .03), 0 10px 30px rgba(20, 24, 40, .06);
+  --shadow-sm: 0 1px 3px rgba(20, 24, 40, .05);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --maxw: 1040px;
 }
@@ -35,8 +37,9 @@
     --accent: #2dd4a7;
     --expense: #ff6b83;
     --income: #2dd4a7;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 16px 40px rgba(0, 0, 0, .45);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
+    --warn: #ffa94d;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 14px 36px rgba(0, 0, 0, .4);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, .3);
   }
 }
 
@@ -109,12 +112,15 @@ h1, h2, h3 { letter-spacing: -.02em; }
     background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
     backdrop-filter: blur(12px);
     border-top: 1px solid var(--line);
-    padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+    overflow-x: auto; scrollbar-width: none;
   }
+  .tabbar::-webkit-scrollbar { display: none; }
   .tabbar button {
-    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    background: none; border: none; padding: 6px 2px;
-    color: var(--ink-faint); font-size: .64rem; font-weight: 600;
+    flex: 1 0 auto; min-width: 58px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: none; border: none; padding: 6px 4px;
+    color: var(--ink-faint); font-size: .63rem; font-weight: 600;
   }
   .tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tabbar button svg { width: 21px; height: 21px; }
@@ -131,10 +137,10 @@ h1, h2, h3 { letter-spacing: -.02em; }
 /* Righe di gestione (Categorie / Conti) */
 #cat-rows .cat-row, #acct-rows .cat-row {
   display: flex; align-items: center; gap: 12px;
-  padding: 13px 15px; border-bottom: 1px solid var(--line);
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
 }
 #cat-rows .cat-row:last-child, #acct-rows .cat-row:last-child { border-bottom: none; }
-.cat-row .dot { width: 13px; height: 13px; border-radius: 5px; flex: none; }
+.cat-row .dot { width: 13px; height: 13px; border-radius: 6px; flex: none; }
 .cat-row .c-main { min-width: 0; flex: 1; }
 .cat-row .c-name { font-weight: 600; }
 .cat-row .c-name .pill { margin-left: 6px; }
@@ -158,7 +164,7 @@ h1, h2, h3 { letter-spacing: -.02em; }
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-.card-pad { padding: 18px; }
+.card-pad { padding: 20px; }
 
 .grid { display: grid; gap: 16px; }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
@@ -166,13 +172,14 @@ h1, h2, h3 { letter-spacing: -.02em; }
 @media (max-width: 760px) { .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; } }
 
 /* ---------- Stat cards ---------- */
-.stat { padding: 18px; display: grid; gap: 6px; }
+.stat { padding: 20px; display: grid; gap: 6px; }
 .stat .label {
   font-size: .76rem; text-transform: uppercase; letter-spacing: .06em;
   color: var(--ink-faint); font-weight: 650;
 }
 .stat .value { font-size: 1.65rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat.expense .value { color: var(--expense); }
+.stat.income .value { color: var(--income); }
 .stat .sub { font-size: .82rem; color: var(--ink-faint); }
 .stat .sub b { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .bal.pos { color: var(--income); }
@@ -189,6 +196,22 @@ h1, h2, h3 { letter-spacing: -.02em; }
 }
 .segment .tab.active { background: var(--bg-elev); color: var(--ink); box-shadow: var(--shadow-sm); }
 .segment .tab:hover:not(.active) { color: var(--ink); }
+
+/* Switch Personale / Casa (Movimenti e Spese fisse): colore diverso per ambito */
+.scope-toggle .tab { transition: color .12s, background .12s; }
+.scope-toggle .tab.active::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block; margin-right: 7px; vertical-align: 1px;
+  background: currentColor;
+}
+.scope-toggle .tab.tog-personal.active {
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 16%, var(--bg-elev));
+}
+.scope-toggle .tab.tog-home.active {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 20%, var(--bg-elev));
+}
 
 .seg { display: inline-flex; background: var(--bg-sunken); border-radius: 999px; padding: 4px; gap: 2px; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
@@ -225,7 +248,7 @@ h1, h2, h3 { letter-spacing: -.02em; }
 }
 .field input:focus, .field select:focus, .select:focus {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
+  box-shadow: var(--ring);
 }
 #date { min-width: 150px; }
 #amount { width: 130px; }
@@ -250,14 +273,50 @@ h1, h2, h3 { letter-spacing: -.02em; }
   border-left: 3px solid var(--brand); color: var(--ink-soft);
 }
 
+/* ---------- Selettore mese/anno (Dashboard) ---------- */
+.period { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.period .select { padding: 8px 12px; font-weight: 600; }
+.period__nav {
+  width: 38px; height: 38px; flex: none; display: grid; place-content: center;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--ink-soft);
+}
+.period__nav:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-faint); }
+.period__nav:disabled { opacity: .4; cursor: not-allowed; }
+.period__nav svg { width: 16px; height: 16px; }
+.period__today { padding: 8px 12px; }
+
+/* ---------- Spese fisse ---------- */
+#rec-day { width: 130px; }
+.seg input#rec-kind-income:checked + label { color: var(--income); }
+.seg input#rec-kind-expense:checked + label { color: var(--expense); }
+
+#rec-rows .rec-row:last-child { border-bottom: none; }
+#rec-rows .rec-row:hover { background: var(--bg-sunken); }
+.rec-row.is-off { opacity: .5; }
+.rec-row.is-off .amount { color: var(--ink-faint); }
+
+.switch { position: relative; display: inline-flex; flex: none; cursor: pointer; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch__track {
+  position: relative;
+  width: 40px; height: 23px; border-radius: 999px; background: var(--line);
+  transition: background .15s;
+}
+.switch__track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px;
+  border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm); transition: transform .15s;
+}
+.switch input:checked + .switch__track { background: var(--income); }
+.switch input:checked + .switch__track::after { transform: translateX(17px); }
+
 /* ---------- Pannello confronto (tab Totale) ---------- */
 .split { margin-bottom: 16px; }
 .split h3 { font-size: 1rem; margin-bottom: 12px; }
 .split__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .split__cell {
   display: flex; flex-direction: column; gap: 4px;
-  padding: 13px 14px; border: 1px solid var(--line);
-  border-radius: 12px; background: var(--bg);
+  padding: 14px 16px; border: 1px solid var(--line);
+  border-radius: 16px; background: var(--bg);
 }
 .split__cell--sum { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
 .split__label { color: var(--ink-faint); font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 650; }
@@ -278,12 +337,12 @@ h1, h2, h3 { letter-spacing: -.02em; }
 
 .tx-list .tx {
   display: flex; align-items: center; gap: 13px;
-  padding: 13px 15px; border-bottom: 1px solid var(--line);
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
 }
 .tx-list .tx:last-child { border-bottom: none; }
 .tx-list .tx:hover { background: var(--bg-sunken); }
 .tx .swatch {
-  width: 38px; height: 38px; border-radius: 11px; flex: none;
+  width: 38px; height: 38px; border-radius: 13px; flex: none;
   display: grid; place-content: center;
   font-size: .95rem; font-weight: 700; color: #fff;
 }
@@ -299,7 +358,7 @@ h1, h2, h3 { letter-spacing: -.02em; }
 
 .icon-btn {
   width: 34px; height: 34px; display: grid; place-content: center;
-  border-radius: 9px; border: 1px solid transparent; background: none; color: var(--ink-faint);
+  border-radius: 11px; border: 1px solid transparent; background: none; color: var(--ink-faint);
 }
 .icon-btn:hover { color: var(--ink); background: var(--bg-elev); border-color: var(--line); }
 .icon-btn.del:hover { color: var(--expense); }
@@ -311,20 +370,21 @@ h1, h2, h3 { letter-spacing: -.02em; }
   border-radius: 999px; font-size: .72rem; font-weight: 600;
   background: var(--bg-sunken); color: var(--ink-soft);
 }
-.pill.home { background: color-mix(in srgb, var(--brand) 15%, transparent); color: var(--brand); }
-.pill.personal { background: var(--bg-sunken); color: var(--ink-soft); }
+.pill.personal { background: color-mix(in srgb, var(--brand) 15%, transparent); color: var(--brand); }
+.pill.home { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 .pill.acct { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.pill.recur { background: var(--bg-sunken); color: var(--ink-soft); font-weight: 700; }
 
 /* Riga in modifica */
-.tx.editing { display: block; padding: 15px; background: var(--bg-sunken); }
+.tx.editing { display: block; padding: 16px; background: var(--bg-sunken); border-radius: 16px; }
 .tx-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
 .tx-edit-grid label { font-size: .74rem; font-weight: 600; color: var(--ink-faint); display: flex; flex-direction: column; gap: 4px; }
 .tx-edit-grid input, .tx-edit-grid select {
-  padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line);
+  padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line);
   background: var(--bg-elev); color: var(--ink); outline: none;
 }
 .tx-edit-grid input:focus, .tx-edit-grid select:focus {
-  border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
+  border-color: var(--brand); box-shadow: var(--ring);
 }
 .tx-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
@@ -335,11 +395,11 @@ h1, h2, h3 { letter-spacing: -.02em; }
 .backup__head h3 { font-size: 1rem; }
 .backup__status { color: var(--ink-faint); font-size: .84rem; }
 .backup__note { color: var(--ink-faint); font-size: .84rem; margin: 8px 0 12px; }
-.backup__note code { background: var(--bg-sunken); padding: 1px 5px; border-radius: 5px; font-size: .92em; }
+.backup__note code { background: var(--bg-sunken); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
 .backup__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .file-btn { position: relative; overflow: hidden; }
 .backup__result {
-  margin-top: 12px; padding: 10px 13px; border-radius: 9px; font-size: .85rem;
+  margin-top: 12px; padding: 11px 14px; border-radius: 12px; font-size: .85rem;
   background: color-mix(in srgb, var(--income) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--income) 32%, transparent);
 }
@@ -350,7 +410,7 @@ h1, h2, h3 { letter-spacing: -.02em; }
 .backup__list { list-style: none; margin-top: 12px; display: grid; gap: 6px; }
 .backup__list li {
   display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: baseline;
-  padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px;
+  padding: 10px 13px; border: 1px solid var(--line); border-radius: 12px;
   background: var(--bg); font-size: .84rem;
 }
 .backup__list a { font-weight: 600; color: var(--brand); text-decoration: none; }
@@ -386,7 +446,7 @@ h1, h2, h3 { letter-spacing: -.02em; }
   padding: 11px 13px; border-radius: var(--radius-sm);
   border: 1px solid var(--line); background: var(--bg); color: var(--ink); outline: none;
 }
-.auth-card input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent); }
+.auth-card input:focus { border-color: var(--brand); box-shadow: var(--ring); }
 .auth-card .btn { margin-top: 16px; justify-content: center; }
 .auth-error { margin-top: 10px; font-size: .85rem; color: var(--expense); text-align: center; }
 
@@ -399,4 +459,48 @@ h1, h2, h3 { letter-spacing: -.02em; }
   .form .btn { width: 100%; justify-content: center; }
   .page-head .segment { width: 100%; justify-content: space-between; }
   .page-head .segment .tab { flex: 1; text-align: center; }
+}
+
+/* ---------- Previsione spese annuali ---------- */
+#fc-amount { width: 140px; }
+#fc-month-field { flex: 0 1 170px; }
+.seg input#fc-kind-income:checked + label { color: var(--income); }
+.seg input#fc-kind-expense:checked + label { color: var(--expense); }
+#fc-freq .tab.active { color: var(--brand); }
+
+.fc-year {
+  font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 3.2ch; text-align: center;
+}
+
+.fc-progress { display: grid; gap: 8px; margin-top: 6px; }
+.fc-progress__head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; flex-wrap: wrap; font-size: .9rem;
+}
+.fc-progress__head b { font-variant-numeric: tabular-nums; }
+.fc-bar {
+  height: 12px; border-radius: var(--radius-pill);
+  background: var(--bg-sunken); overflow: hidden;
+}
+.fc-bar__fill {
+  height: 100%; border-radius: var(--radius-pill);
+  background: var(--brand); transition: width .3s ease;
+}
+.fc-bar__fill.over { background: var(--expense); }
+
+.fc-catlist { display: grid; gap: 12px; }
+.fc-catrow { display: grid; gap: 6px; }
+.fc-catrow__head {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: .88rem; font-weight: 600;
+}
+.fc-catrow__head span:last-child { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.fc-catrow .fc-bar { height: 9px; }
+
+.fc-row .amount {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+}
+.fc-row .amount .fc-freq {
+  font-size: .72rem; font-weight: 600; color: var(--ink-faint);
 }
